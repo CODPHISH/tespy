@@ -732,16 +732,60 @@ class Network:
         logger.info(msg)
 
     def _check_connections(self):
-        r"""Check connections for multiple usage of inlets or outlets."""
+        r"""
+        检查连接的重复使用问题
+
+        这个方法验证网络拓扑的物理合理性，确保：
+        1. 每个组件的出口端口只能连接到一个目标（防止"分流"错误）
+        2. 每个组件的入口端口只能接收一个源的输入（防止"合流"错误）
+
+        物理意义：
+        - 出口重复：一个管道出口不能同时连接到两个不同的设备
+        - 入口重复：一个设备入口不能同时接收两根管道的流体
+
+        正确的分流/合流应该使用专门的Splitter/Merger组件
+        """
+
+        # =================================================================
+        # 检查源端口（出口）的重复使用
+        # =================================================================
+
+        # 使用pandas的duplicated()方法找出重复的(source, source_id)组合
+        # duplicated()返回布尔Series，标记除第一次出现外的重复项为True
         dub = self.conns.loc[self.conns.duplicated(["source", "source_id"])]
+
+        # 示例：假设有以下错误的连接配置
+        # c1: pump.out1 → tank1.in1
+        # c2: pump.out1 → tank2.in1  ← 这是重复使用pump.out1的错误连接
+        #
+        # self.conns DataFrame可能如下：
+        #     object  source source_id target target_id
+        # c1    c1    pump    out1    tank1    in1
+        # c2    c2    pump    out1    tank2    in1     ← 这行会被duplicated()标记
+        #
+        # dub DataFrame将包含c2这一行（重复的连接记录）
+
+        # 遍历每个重复使用的源端口连接
         for c in dub['object']:
+
+            # 收集所有连接到同一源端口的目标信息，用于错误报告
             targets = []
+
+            # 创建掩码，找出所有连接到同一个源端口的连接
+            # 使用.values是为了进行元素级比较，避免索引对齐问题
             mask = (
                 (self.conns["source"].values == c.source)
                 & (self.conns["source_id"].values == c.source_id)
             )
+
+            # 遍历所有匹配的连接，收集目标信息用于错误消息
+            # 对于上面的示例，mask会匹配c1和c2两行
             for conns in self.conns.loc[mask, "object"]:
+                # 格式化目标信息：组件标签(端口ID)
                 targets += [f"\"{conns.target.label}\" ({conns.target_id})"]
+
+            # 将目标列表转换为逗号分隔的字符串
+            # 示例：targets = ["tank1" (in1), "tank2" (in1)]
             targets = ", ".join(targets)
 
             msg = (
@@ -750,7 +794,19 @@ class Network:
                 "Please check your network configuration."
             )
             logger.error(msg)
+
+            # 示例错误消息：
+            # "The source "pump" (out1) is attached to more than one component
+            #  on the target side: "tank1" (in1), "tank2" (in1).
+            #  Please check your network configuration."
+
+            # 抛出异常，程序立即终止，不会执行第二次迭代
+            # 虽然 dub 可能包含多个重复项，但实际执行只报告一次错误
             raise hlp.TESPyNetworkError(msg)
+
+        # =================================================================
+        # 检查目标端口（入口）的重复使用
+        # =================================================================
 
         dub = self.conns.loc[
             self.conns.duplicated(['target', 'target_id'])
@@ -772,6 +828,43 @@ class Network:
             logger.error(msg)
             raise hlp.TESPyNetworkError(msg)
 
+        # =================================================================
+        # 正确的网络配置示例和建议
+        # =================================================================
+
+        # ❌ 错误的分流配置：
+        # pump.out1 → tank1.in1
+        # pump.out1 → tank2.in1  # 错误：重复使用pump.out1
+
+        # ✅ 正确的分流配置：
+        # pump.out1 → splitter.in1
+        # splitter.out1 → tank1.in1
+        # splitter.out2 → tank2.in1
+
+        # ❌ 错误的合流配置：
+        # pump1.out1 → tank.in1
+        # pump2.out1 → tank.in1  # 错误：重复使用tank.in1
+
+        # ✅ 正确的合流配置：
+        # pump1.out1 → merger.in1
+        # pump2.out1 → merger.in2
+        # merger.out1 → tank.in1
+
+        # =================================================================
+        # 检查通过后的保证
+        # =================================================================
+
+        # 如果这个方法成功执行（没有抛出异常），则保证：
+        # 1. 每个组件的每个出口端口最多连接一个目标
+        # 2. 每个组件的每个入口端口最多接收一个源
+        # 3. 网络拓扑在连接层面是物理合理的
+        # 4. 后续的求解过程不会因为连接冲突而失败
+
+        # 注意：这个检查只验证连接的唯一性，不检查：
+        # - 连接的完整性（组件是否有未连接的端口）
+        # - 连接的有效性（端口是否在组件定义中存在）
+        # 这些检查在其他方法中完成
+
     def _init_connection_result_datastructure(self):
 
         for conn_type in self.conns["conn_type"].unique():
@@ -788,24 +881,59 @@ class Network:
                 self.results[conn_type] = pd.DataFrame(columns=cols, dtype='float64')
 
     def _init_components(self):
-        r"""Set up necessary component information."""
+        r"""
+        设置必要的组件信息
+
+        这个方法为网络中的每个组件建立与连接的映射关系，并初始化数据管理结构。
+        主要完成以下工作：
+        1. 识别并验证组件的物质流入口和出口连接
+        2. 识别并验证组件的功率入口和出口连接
+        3. 设置组件的连接属性（包括物质流和功率连接）
+        4. 为每种组件类型创建结果存储DataFrame
+        """
+
+        # 遍历网络中已注册的组件实例
         for comp in self.comps["object"]:
-            # get incoming and outgoing connections of a component
+
+            # =================================================================
+            # 识别并验证组件的物质流出口连接（组件作为连接的源头）
+            # =================================================================
+
+            # 创建源组件匹配掩码，找出当前组件作为source的所有连接
             source_mask = self.conns["source"] == comp
+            # 创建有效性连接器掩码，找出当前组件出口端作为source_id的所有连接
             required_connectors_mask = self.conns["source_id"].isin(comp.outlets())
+
+            # 示例：假设Pump类定义的出口为['out1']
+            # 如果有人错误地创建了 pump.out2 → tank.in1 的连接
+            # required_connectors_mask 会排除这个无效连接，因为'out2'不在comp.outlets()中
+
+            # 组合两个掩码查询source连接：既要是当前组件的连接，又要是有效的连接器
             sources = self.conns[source_mask & required_connectors_mask]
+            # 按source_id排序并获取连接标签列表，确保连接顺序一致性
             sources = sources["source_id"].sort_values().index.tolist()
+
+            # =================================================================
+            # 识别并验证组件的物质流入口连接（组件作为连接的目标）
+            # =================================================================
+
             target_mask = self.conns["target"] == comp
             required_connectors_mask = self.conns["target_id"].isin(comp.inlets())
             targets = self.conns[target_mask & required_connectors_mask]
             targets = targets["target_id"].sort_values().index.tolist()
-            # save the incoming and outgoing as well as the number of
-            # connections as component attribute
+
+            # 将入口连接的Connection对象存储到组件的inl属性中
             comp.inl = self.conns.loc[targets, "object"].tolist()
+            # 将出口连接的Connection对象存储到组件的outl属性中
             comp.outl = self.conns.loc[sources, "object"].tolist()
+            # 获取组件类定义的期望连接数量
             comp.num_i = len(comp.inlets())
             comp.num_o = len(comp.outlets())
 
+            # =================================================================
+            # 识别并验证组件的功率出口连接
+            # 功率连接用于电力、机械功率等能量传递，不同于物质流连接
+            # =================================================================
             required_connectors_mask = self.conns["source_id"].isin(comp.poweroutlets())
             sources = self.conns[source_mask & required_connectors_mask]
             sources = sources["source_id"].sort_values().index.tolist()
@@ -819,20 +947,40 @@ class Network:
             comp.num_power_i = len(comp.powerinlets())
             comp.num_power_o = len(comp.poweroutlets())
 
-            # set up restults and specification dataframes
+            # 获取组件的类名，如'Pump', 'HeatExchanger', 'Motor'等
             comp_type = comp.__class__.__name__
+            # 检查是否已经为该组件类型创建了结果DataFrame
             if comp_type not in self.results:
+                # 从组件参数中筛选出ComponentProperties类型的参数
+                # 这些参数的计算结果需要存储，如效率、功率、压比等
                 cols = [
                     col for col, data in comp.parameters.items()
-                    if isinstance(data, dc_cp)
+                    if isinstance(data, dc_cp)  # dc_cp = ComponentProperties
                 ]
+                # 为该组件类型创建结果DataFrame
                 self.results[comp_type] = pd.DataFrame(
                     columns=cols, dtype='float64'
                 )
 
+                # 示例：创建后的结构
+                # self.results['Motor'] = 空DataFrame，列名可能包含['P', 'eta', 'torque']
+                # self.results['Generator'] = 空DataFrame，列名可能包含['P', 'eta', 'frequency']
+
     def _check_components(self):
-        # count number of incoming and outgoing connections and compare to
-        # expected values
+        r"""
+        检查组件的连接完整性
+
+        这个方法验证网络中每个组件的实际连接数量是否与组件类定义的期望连接数量匹配。
+        包括物质流连接和功率连接的完整性检查。
+
+        检查内容：
+        1. 验证每个组件的物质流出口连接数量
+        2. 验证每个组件的物质流入口连接数量
+        3. 验证每个组件的功率出口连接数量（如果有功率连接）
+        4. 验证每个组件的功率入口连接数量（如果有功率连接）
+
+        如果发现连接不完整，会抛出异常。
+        """
         for comp in self.comps['object']:
             if len(comp.outl) != comp.num_o:
                 msg = (
@@ -882,39 +1030,34 @@ class Network:
 
     def _prepare_problem(self):
         r"""
-        Initilialise the network depending on calclation mode.
+        根据计算模式初始化网络求解问题
 
-        Design
+        Design 设计模式
 
-        - Generic fluid composition and fluid property initialisation.
-        - Starting values from initialisation path if provided.
+        - 初始化通用流体组成和流体物性
+        - 如果提供了初始化路径，从中加载初始值
 
-        Offdesign
+        Offdesign 非设计模式
 
-        - Check offdesign path specification.
-        - Set component and connection design point properties.
-        - Switch from design/offdesign parameter specification.
+        - 检查非设计模式路径规范
+        - 设置组件和连接的设计点属性
+        - 切换参数规范从设计模式到非设计模式
         """
-        # keep track of the number of bus, component and connection equations
-        # as well as number of component variables
+        # 跟踪总线方程、组件方程和连接方程的数量以及组件变量的数量
         self.num_bus_eq = 0
         self.num_comp_eq = 0
         self.num_conn_eq = 0
         self.variable_counter = 0
         self.variables_dict = {}
 
-        # in multiprocessing copies are made of all connections
-        # the mass flow branches and fluid branches hold references to
-        # connections from the original run (where network.checked is False)
-        # The assignment of variable spaces etc. is however made on the
-        # copies of the connections which do not correspond to the mass flow
-        # branches and fluid branches anymore. So the topology simplification
-        # does not actually apply to the copied network, therefore the
-        # branches have to be recreated for this case. We can detect that by
-        # checking whether a network holds a massflow branch with some
-        # connections and compare that with the connection object actually
-        # present in the network
+        # 在多进程计算中，所有连接都会被复制
+        # 质量流分支和流体分支持有对原始运行中连接的引用（network.checked为False的情况）
+        # 但变量空间等的分配是在连接的副本上进行的，这些副本与质量流分支和流体分支不再对应
+        # 因此，拓扑简化不适用于复制的网络，需要重新创建分支
+        # 通过检查网络是否持有包含某些连接的质量流分支，并将其与网络中实际存在的连接对象进行比较来检测
         for k, v in self.fluid_wrapper_branches.items():
+            # 检测流体分支中引用的 Connection 是否等于 network 当前持有的对象
+            # 如果不相等，说明是复制的网络（在并行计算中），需要重新创建流体分支，避免引用错误
             if self.conns.loc[v["connections"][0].label, "object"] != v["connections"][0]:
                 self._create_fluid_wrapper_branches()
             continue
@@ -1483,14 +1626,52 @@ class Network:
 
     def _create_fluid_wrapper_branches(self):
 
+        # 初始化流体包装器分支字典
+        # 存储格式：{分支名: {"connections": [连接列表], "components": [组件列表]}}
         self.fluid_wrapper_branches = {}
+
+        # =================================================================
+        # 识别流体属性起始组件
+        # =================================================================
+
+        # 创建掩码，筛选出能够定义流体属性的特殊组件类型
         mask = self.comps["comp_type"].isin(
             ["Source", "CycleCloser", "WaterElectrolyzer", "FuelCell"]
         )
+
+        # 各组件类型的物理意义：
+        # - Source: 流体来源，如水源、空气入口、燃料供应等 通常在此处定义流体的初始组成和物性
+        # - CycleCloser: 循环闭合器，用于闭合热力循环 定义循环工质的基准状态
+        # - WaterElectrolyzer: 水电解器，产生氢气和氧气 定义产物气体的组成和纯度
+        # - FuelCell: 燃料电池，消耗氢气和氧气产生水 定义反应物和产物的流体属性
+
+        # 获取所有符合条件的起始组件对象
         start_components = self.comps["object"].loc[mask]
 
+        # 遍历每个起始组件，让它们各自构建自己的流体传播分支
         for start in start_components:
             self.fluid_wrapper_branches.update(start.start_fluid_wrapper_branch())
+
+        # 示例：执行后可能得到
+        # self.fluid_wrapper_branches = {
+        #     "water_source_branch": {
+        #         "connections": [c1, c2, c3],  # 水流路径上的连接
+        #         "components": [water_source, pump, tank]  # 水流路径上的组件
+        #     },
+        #     "air_source_branch": {
+        #         "connections": [c4, c5],  # 空气流路径上的连接
+        #         "components": [air_source, compressor]  # 空气流路径上的组件
+        #     }
+        # }
+
+        # =================================================================
+        # 合并有交集的流体包装器分支
+        # =================================================================
+
+        # 为什么需要合并？
+        # 在复杂网络中，不同起始组件的流体传播路径可能会交汇，
+        # 例如：水和空气在混合器中汇合，或者在换热器中进行热交换。
+        # 如果不合并，会导致同一个连接被多个分支管理，产生冲突。
 
         merged = self.fluid_wrapper_branches.copy()
         for branch_name, branch_data in self.fluid_wrapper_branches.items():
@@ -1513,6 +1694,15 @@ class Network:
                         break
 
         self.fluid_wrapper_branches = merged
+
+        # 示例：合并后的最终结果可能是
+        # self.fluid_wrapper_branches = {
+        #     "water_source_branch": {
+        #         "connections": [c1, c2, c3, c4, c5],  # 包含了所有相关连接
+        #         "components": [water_source, pump, tank, mixer, heat_exchanger]
+        #     }
+        #     # air_source_branch被合并到water_source_branch中了
+        # }
 
     def _presolve(self):
         # handle the fluid vector variables
