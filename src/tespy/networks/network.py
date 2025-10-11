@@ -12,7 +12,7 @@ available from its original location tespy/networks/networks.py
 
 SPDX-License-Identifier: MIT
 """
-import importlib
+import importlib # 支持动态导入，实现插件化架构
 import json
 import math
 import os
@@ -21,7 +21,7 @@ from time import time
 import numpy as np
 import pandas as pd
 from numpy.linalg import norm
-from tabulate import tabulate
+from tabulate import tabulate # 结果的美观输出
 
 from tespy.components.component import component_registry
 from tespy.connections import Bus
@@ -35,8 +35,8 @@ from tespy.tools import logger
 from tespy.tools.characteristics import CharLine
 from tespy.tools.characteristics import CharMap
 from tespy.tools.data_containers import ComponentCharacteristicMaps as dc_cm
-from tespy.tools.data_containers import ComponentCharacteristics as dc_cc
-from tespy.tools.data_containers import ComponentProperties as dc_cp
+from tespy.tools.data_containers import ComponentCharacteristics as dc_cc # 组件特性
+from tespy.tools.data_containers import ComponentProperties as dc_cp # 组件属性
 from tespy.tools.data_containers import DataContainer as dc
 from tespy.tools.data_containers import FluidProperties as dc_prop
 from tespy.tools.data_containers import GroupedComponentCharacteristics as dc_gcc
@@ -1062,18 +1062,23 @@ class Network:
                 self._create_fluid_wrapper_branches()
             continue
 
+        # 在流体分支间传播流体属性（组成、物性包等）
         self._propagate_fluid_wrappers()
+        # 为连接结果创建数据结构（DataFrame）
         self._init_connection_result_datastructure()
+        # 根据求解模式（design/offdesign）准备参数设置
         self._prepare_solve_mode()
-        # this method will distribute units and set SI values from given values
-        # and units
+        # 将用户指定的单位转换为SI单位进行内部计算
         self._init_set_properties()
+        # 创建结构矩阵：定义变量之间的依赖关系
         self._create_structure_matrix()
 
+        # 预求解：处理一些可以提前确定的变量和方程
         self._presolve()
+        # 为求解器准备最终的数据结构
         self._prepare_for_solver()
 
-        # generic fluid property initialisation
+        # 初始化所有连接上的流体物性初值，确保物性函数可以正常调用
         self._init_properties()
 
         msg = 'Network initialised.'
@@ -1306,30 +1311,80 @@ class Network:
                 self.variable_counter += 1
 
     def _create_structure_matrix(self):
+        """
+        创建求解问题的结构矩阵
+
+        这个方法构建求解器需要的核心数据结构：
+        1. 结构矩阵：描述方程和变量的关系
+        2. 右端项：方程的常数项
+        3. 变量查找表：变量编号到对象的映射
+        4. 方程查找表：方程编号到对象的映射
+        """
+
+        # =================================================================
+        # 初始化数据结构
+        # =================================================================
+
+        # 结构矩阵：稀疏矩阵，存储雅可比矩阵的结构信息
+        # 格式：{(行号, 列号): 系数}
         self._structure_matrix = {}
+
+        # 右端项：方程组的右端常数项
+        # 格式：{方程编号: 常数值}
         self._rhs = {}
+
+        # 变量查找表：从变量编号映射到变量的父对象和属性名
+        # 格式：{变量编号: {"object": 对象, "property": 属性名}}
         self._variable_lookup = {}
+
+        # 对象到变量的反向查找表
+        # 格式：{对象: {属性名: 变量编号}}
         self._object_to_variable_lookup = {}
+
+        # 方程集查找表：从方程编号映射到方程信息
+        # 格式：{方程编号: (对象标签, 方程名)}
         self._equation_set_lookup = {}
+
+        # 预求解的方程列表
         self._presolved_equations = []
+
+        # 参考容器查找表：用于处理线性相关变量
         self._reference_container_lookup = {}
+
+        # 方程查找表：最终求解阶段的方程映射
         self._equation_lookup = {}
+
+        # 关联矩阵：存储方程对变量的依赖关系
         self._incidence_matrix = {}
 
+        # 为所有连接和组件的变量分配编号
         num_vars = self._prepare_variables()
 
         sum_eq = 0
+        # 连接的预处理主要处理流体连续性方程、能量守恒等
         sum_eq = self._preprocess_network_parts(self.conns["object"], sum_eq)
+        # 组件的预处理
         sum_eq = self._preprocess_network_parts(self.comps["object"], sum_eq)
+        # 用户自定义方程预处理
         sum_eq = self._preprocess_network_parts(self.user_defined_eq.values(), sum_eq)
 
+        # =================================================================
+        # 寻找线性相关变量
+        # =================================================================
+
+        # 分析结构矩阵，找出线性相关的变量
+        # 例如：在某些连接中，压力或焓值可能由其他变量唯一确定
         _linear_dependencies = self._find_linear_dependent_variables(
             self._structure_matrix, self._rhs
         )
+
+        # 提取所有线性相关的变量编号
         _linear_dependent_variables = [
             var for linear_dependents in _linear_dependencies
             for var in linear_dependents["variables"]
         ]
+
+        # 处理独立变量（不线性相关的变量）
         _missing_variables = [
             {
                 "variables": [var],
@@ -1340,8 +1395,15 @@ class Network:
             }
             for var in set(range(num_vars)) - set(_linear_dependent_variables)
         ]
+
+        # 合并线性相关和独立变量的信息
         self._variable_dependencies = _missing_variables + _linear_dependencies
 
+        # =================================================================
+        # 设置参考容器
+        # =================================================================
+
+        # 为每组线性相关的变量创建参考容器
         for linear_dependents in self._variable_dependencies:
             reference_variable = self._variable_lookup[
                 linear_dependents["reference"]
@@ -1394,13 +1456,14 @@ class Network:
                 container._factor = linear_dependents["factors"][variable]
                 container._offset = linear_dependents["offsets"][variable]
 
-        # impose set values in the reference containers
+        # 将用户设定的值传递给参考容器
         for conn in self.conns["object"]:
             for prop, container in conn.get_variables().items():
                 if conn.get_attr(prop).is_set:
                     conn.get_attr(prop).set_reference_val_SI(conn.get_attr(prop)._val_SI)
 
-        # collect all presolved equations
+        # 收集所有可以预先求解的方程编号
+        # 这些方程不需要迭代求解，可以直接计算结果
         self._presolved_equations = [
             indices
             for dependents in self._variable_dependencies
@@ -1455,16 +1518,41 @@ class Network:
         return num_vars
 
     def _preprocess_network_parts(self, parts, eq_counter):
+        """
+        预处理网络部件（连接、组件、用户定义方程）
+        对于每个网络部件（组件、连接等），调用其_preprocess方法
 
+        参数:
+        parts: 网络部件列表（可能是组件列表、连接列表等）
+        eq_counter: 当前方程计数器
+
+        返回:
+        更新后的方程计数器
+        """
         for obj in parts:
+            # obj可能是
+            # 1. Component对象（如Valve、Pump、HeatExchanger等）
+            # 2. Connection对象（连接两个组件的管道）
+            # 3. UserDefinedEquation对象（用户自定义方程）
+            # 调用对象的预处理方法
             obj._preprocess(eq_counter)
+
+            # 收集对象构建的结构矩阵信息
+            # 结构矩阵描述了雅可比矩阵的稀疏结构
             self._structure_matrix.update(obj._structure_matrix)
+
+            # 收集对象构建的右端项信息，残差向量
             self._rhs.update(obj._rhs)
+
+            # 建立方程编号到方程名称的映射
             eq_map = {
                 eq_num: (obj.label, eq_name)
                 for eq_num, eq_name in obj._equation_set_lookup.items()
             }
             self._equation_set_lookup.update(eq_map)
+
+            # 更新方程计数器
+            # obj.num_eq是该对象贡献的方程数量
             eq_counter += obj.num_eq
 
         return eq_counter
@@ -2610,32 +2698,44 @@ class Network:
         For more information on the solution process have a look at the online
         documentation at tespy.readthedocs.io in the section "TESPy modules".
         """
-        ## to own function
+
+        # =================================================================
+        # 初始化和验证
+        # =================================================================
+
+        # 设置求解状态，99表示未开始求解
         self.status = 99
         self.new_design = False
+
+        # 比较当前设计路径和之前的检查是否需要重新设计
         if self.design_path == design_path and design_path is not None:
+            # 遍历所有连接，检查是否有新的设计参数
             for c in self.conns['object']:
                 if c.new_design:
                     self.new_design = True
                     break
+            # 如果连接没有新设计，检查组件
             if not self.new_design:
                 for cp in self.comps['object']:
                     if cp.new_design:
                         self.new_design = True
                         break
 
+        # 设计路径改变标记为新设计
         else:
             self.new_design = True
 
-        self.init_path = init_path
-        self.design_path = design_path
-        self.max_iter = max_iter
-        self.min_iter = min_iter
-        self.init_previous = init_previous
-        self.iter = 0
-        self.use_cuda = use_cuda
-        self.robust_relax = robust_relax
+        # 保存求解参数到实例变量，供其他方法使用
+        self.init_path = init_path          # 初始值路径
+        self.design_path = design_path      # 设计工况路径
+        self.max_iter = max_iter            # 最大迭代次数
+        self.min_iter = min_iter            # 最小迭代次数
+        self.init_previous = init_previous  # 是否使用前次计算结果作为初值
+        self.iter = 0                       # 当前迭代次数
+        self.use_cuda = use_cuda            # 是否使用GPU加速
+        self.robust_relax = robust_relax    # 是否使用稳健松弛算法
 
+        # CUDA 可用性检查
         if self.use_cuda and cu is None:
             msg = (
                 'Specifying use_cuda=True requires cupy to be installed on '
@@ -2644,6 +2744,7 @@ class Network:
             logger.warning(msg)
             self.use_cuda = False
 
+        # 验证求解模式
         if mode not in ['offdesign', 'design']:
             msg = 'Mode must be "design" or "offdesign".'
             logger.error(msg)
@@ -2651,9 +2752,15 @@ class Network:
         else:
             self.mode = mode
 
+        # =================================================================
+        # 网络拓扑检查
+        # =================================================================
+
+        # 如果网络拓扑未检查过，进行检查
         if not self.checked:
             self.check_topology()
 
+        # 记录求解配置信息，用于调试和日志
         msg = (
             "Solver properties:\n"
             f" - mode: {self.mode}\n"
@@ -2664,6 +2771,7 @@ class Network:
         )
         logger.debug(msg)
 
+        # 记录网络规模信息
         msg = (
             "Network information:\n"
             f" - Number of components: {len(self.comps)}\n"
@@ -2672,17 +2780,24 @@ class Network:
         )
         logger.debug(msg)
 
+        # 准备求解问题的数学模型
         self._prepare_problem()
 
+        # 如果只进行初始化，不进行实际求解，则返回
         if init_only:
             return
 
+        # =================================================================
+        # 数值求解
+        # =================================================================
         msg = 'Starting solver.'
         logger.info(msg)
 
+        # 检查方程数和变量数是否匹配（可解性检查）
         self.solve_determination()
 
         try:
+            # 执行牛顿法迭代求解
             self.solve_loop(print_results=print_results)
         except ValueError as e:
             self.status = 99
@@ -2691,12 +2806,19 @@ class Network:
             self.unload_variables()
             return
 
+        # 清理变量空间，释放内存
         self.unload_variables()
 
+        # =================================================================
+        # 错误处理和后处理
+        # =================================================================
+
+        # 检查是否出现奇异性（方程组不可解）
         if self.status == 3:
             logger.error(self.singularity_msg)
             return
 
+        # 检查是否收敛失败
         if self.status == 2:
             msg = (
                 'The solver does not seem to make any progress, aborting '
@@ -2708,6 +2830,7 @@ class Network:
             logger.warning(msg)
             return
 
+        # 求解成功，进行后处理计算
         self.postprocessing()
 
         msg = 'Calculation complete.'
