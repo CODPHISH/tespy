@@ -9,10 +9,13 @@ tests/test_errors.py
 
 SPDX-License-Identifier: MIT
 """
+import logging
 import os
 import shutil
+import warnings
 
 from pytest import raises
+from pytest import warns
 
 from tespy.components import CombustionChamber
 from tespy.components import CombustionEngine
@@ -42,6 +45,7 @@ from tespy.tools.helpers import TESPyConnectionError
 from tespy.tools.helpers import TESPyNetworkError
 from tespy.tools.helpers import UserDefinedEquation
 from tespy.tools.helpers import extend_basic_path
+from tespy.tools.logger import FutureWarningHandler
 
 ##############################################################################
 # test errors of set_attr and get_attr methods
@@ -72,6 +76,11 @@ def set_attr_ValueError(instance, **kwargs):
         instance.set_attr(**kwargs)
 
 
+def set_attr_AttributeError(instance, **kwargs):
+    with raises(AttributeError):
+        instance.set_attr(**kwargs)
+
+
 def test_set_attr_errors():
     """Test errors of set_attr methods."""
     nw = Network()
@@ -84,12 +93,6 @@ def test_set_attr_errors():
     set_attr_ValueError(comb, offdesign=['Q'])
 
     set_attr_ValueError(conn, offdesign=['f'])
-
-    set_attr_ValueError(nw, m_unit='kg')
-    set_attr_ValueError(nw, h_unit='kg')
-    set_attr_ValueError(nw, p_unit='kg')
-    set_attr_ValueError(nw, T_unit='kg')
-    set_attr_ValueError(nw, v_unit='kg')
 
     # TypeErrors
     set_attr_TypeError(comb, P=[5])
@@ -118,13 +121,13 @@ def test_set_attr_errors():
     set_attr_TypeError(mybus, printout=5)
 
     # KeyErrors
-    set_attr_KeyError(dc_cc(), x=7)
+    set_attr_AttributeError(dc_cc(), x=7)
     set_attr_KeyError(comb, wow=5)
     set_attr_KeyError(conn, jey=5)
     set_attr_KeyError(mybus, power_output=100000)
 
     # NotImplementedError
-    set_attr_NotImplementedError(conn, Td_bp=Ref(conn, 1, 0))
+    set_attr_NotImplementedError(conn, td_bubble=Ref(conn, 1, 0))
     set_attr_NotImplementedError(conn, x=Ref(conn, 1, 0))
 
 
@@ -568,3 +571,18 @@ def test_h_mix_pQ_on_mixtures():
     c._create_fluid_wrapper()
     with raises(ValueError):
         h_mix_pQ(1e5, 0.5, c.fluid_data, c.mixing_rule)
+
+
+def test_warning_logged_with_correct_category(caplog):
+    logger_name = "TESPyLogger"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.WARNING)
+
+    with caplog.at_level(logging.WARNING, logger=logger_name):
+        warnings.showwarning = FutureWarningHandler(logger)
+        warnings.warn("Custom test message", category=UserWarning)
+
+        assert any([
+            "UserWarning: Custom test message" in msg
+            for msg in caplog.messages
+        ])

@@ -20,7 +20,7 @@ from tespy.components.heat_exchangers.base import HeatExchanger
 from tespy.tools import logger
 from tespy.tools.data_containers import SimpleDataContainer as dc_simple
 from tespy.tools.fluid_properties import h_mix_pQ
-from tespy.tools.helpers import convert_from_SI
+from tespy.tools.fluid_properties import single_fluid
 
 
 @component_registry
@@ -33,8 +33,8 @@ class Condenser(HeatExchanger):
 
     **Mandatory Equations**
 
-    - :py:meth:`tespy.components.component.Component.fluid_func`
-    - :py:meth:`tespy.components.component.Component.mass_flow_func`
+    - fluid: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
+    - mass flow: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.energy_balance_func`
     - condensate outlet state, function can be disabled by specifying
       :code:`set_attr(subcooling=True)`
@@ -42,21 +42,24 @@ class Condenser(HeatExchanger):
 
     **Optional Equations**
 
+    The :code:`Condenser` class uses an individual definition for the
+    calculation of the logarithmic temperature difference
+
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.energy_balance_hot_func`
-    - :py:meth:`tespy.components.heat_exchangers.condenser.Condenser.kA_func`
-    - :py:meth:`tespy.components.heat_exchangers.condenser.Condenser.kA_char_func`
-    - :py:meth:`tespy.components.heat_exchangers.condenser.Condenser.ttd_u_func`
+    - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.kA_func`
+    - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.kA_char_func`
+    - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.ttd_u_func`
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.ttd_l_func`
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.ttd_min_func`
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.eff_cold_func`
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.eff_hot_func`
     - :py:meth:`tespy.components.heat_exchangers.base.HeatExchanger.eff_max_func`
-    - hot side :py:meth:`tespy.components.component.Component.pr_func`
-    - cold side :py:meth:`tespy.components.component.Component.pr_func`
-    - hot side :py:meth:`tespy.components.component.Component.zeta_func`
-    - cold side :py:meth:`tespy.components.component.Component.zeta_func`
-    - hot side :py:meth:`tespy.components.component.Component.dp_func`
-    - cold side :py:meth:`tespy.components.component.Component.dp_func`
+
+    For hot and cold side individually:
+
+    - :py:meth:`tespy.components.component.Component.pr_structure_matrix`
+    - :py:meth:`tespy.components.component.Component.dp_structure_matrix`
+    - :py:meth:`tespy.components.component.Component.zeta_func`
 
     Inlets/Outlets
 
@@ -184,8 +187,10 @@ class Condenser(HeatExchanger):
     >>> from tespy.networks import Network
     >>> from tespy.tools.fluid_properties import T_sat_p
     >>> import os
-    >>> nw = Network(T_unit='C', p_unit='bar', h_unit='kJ / kg',
-    ... m_range=[0.01, 1000], iterinfo=False)
+    >>> nw = Network(m_range=[0.01, 1000], iterinfo=False)
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg"
+    ... })
     >>> amb_in = Source('ambient air inlet')
     >>> amb_out = Sink('air outlet')
     >>> waste_steam = Source('waste steam')
@@ -226,7 +231,7 @@ class Condenser(HeatExchanger):
     temperature is specified to 5 K.
 
     >>> cond.set_attr(subcooling=True)
-    >>> he_c.set_attr(Td_bp=-5)
+    >>> he_c.set_attr(td_bubble=5)
     >>> nw.solve('offdesign', design_path='tmp.json')
     >>> round(ws_he.T.val - he_amb.T.val, 1)
     62.5
@@ -331,7 +336,7 @@ class Condenser(HeatExchanger):
         Note
         ----
         For standard functions f\ :subscript:`1` \ and f\ :subscript:`2` \ see
-        module :py:mod:`tespy.data`.
+        module :ref:`tespy.data <tespy_data_label>`.
         """
         return super().kA_char_func()
 
@@ -368,47 +373,48 @@ class Condenser(HeatExchanger):
 
     def calc_parameters(self):
         r"""Postprocessing parameter calculation."""
-        self.Q.val = self.inl[0].m.val_SI * (
+        self.Q.val_SI = self.inl[0].m.val_SI * (
             self.outl[0].h.val_SI - self.inl[0].h.val_SI
         )
-        self.ttd_u.val = self.inl[0].calc_T_sat() - self.outl[1].T.val_SI
-        self.ttd_l.val = self.outl[0].T.val_SI - self.inl[1].T.val_SI
-        self.ttd_min.val = min(self.ttd_u.val, self.ttd_l.val)
+        self.ttd_u.val_SI = self.inl[0].calc_T_sat() - self.outl[1].T.val_SI
+        self.ttd_l.val_SI = self.outl[0].T.val_SI - self.inl[1].T.val_SI
+        self.ttd_min.val_SI = min(self.ttd_u.val_SI, self.ttd_l.val_SI)
 
         # pr and zeta
         for i in range(2):
-            self.get_attr(f'pr{i + 1}').val = (
+            self.get_attr(f'pr{i + 1}').val_SI = (
                 self.outl[i].p.val_SI / self.inl[i].p.val_SI
             )
-            self.get_attr(f'zeta{i + 1}').val = self.calc_zeta(
+            self.get_attr(f'zeta{i + 1}').val_SI = self.calc_zeta(
                 self.inl[i], self.outl[i]
             )
             self.get_attr(f'dp{i + 1}').val_SI = (
-                self.inl[i].p.val_SI - self.outl[i].p.val_SI)
-            self.get_attr(f'dp{i + 1}').val = convert_from_SI(
-                'p', self.get_attr(f'dp{i + 1}').val_SI, self.inl[i].p.unit
+                self.inl[i].p.val_SI - self.outl[i].p.val_SI
             )
 
         # kA and logarithmic temperature difference
-        if self.ttd_u.val < 0 or self.ttd_l.val < 0:
-            self.td_log.val = np.nan
-        elif round(self.ttd_l.val, 6) == round(self.ttd_u.val, 6):
-            self.td_log.val = self.ttd_l.val
+        if self.ttd_u.val_SI < 0 or self.ttd_l.val_SI < 0:
+            self.td_log.val_SI = np.nan
+        elif round(self.ttd_l.val_SI, 6) == round(self.ttd_u.val_SI, 6):
+            self.td_log.val_SI = self.ttd_l.val_SI
+        elif round(self.ttd_l.val_SI, 6) == 0 or round(self.ttd_u.val_SI, 6) == 0:
+            self.td_log.val_SI = np.nan
         else:
-            self.td_log.val = (
-                (self.ttd_l.val - self.ttd_u.val)
-                / math.log(self.ttd_l.val / self.ttd_u.val)
+            self.td_log.val_SI = (
+                (self.ttd_l.val_SI - self.ttd_u.val_SI)
+                / math.log(self.ttd_l.val_SI / self.ttd_u.val_SI)
             )
-        self.kA.val = -self.Q.val / self.td_log.val
+
+        self.kA.val_SI = -self.Q.val_SI / self.td_log.val_SI
 
         # heat exchanger efficiencies
         try:
-            self.eff_hot.val = (
+            self.eff_hot.val_SI = (
                 (self.outl[0].h.val_SI - self.inl[0].h.val_SI)
                 / self.calc_dh_max_hot()
             )
         except ValueError:
-            self.eff_hot.val = np.nan
+            self.eff_hot.val_SI = np.nan
             msg = (
                 f"Cannot calculate {self.label} hot side effectiveness "
                 "because cold side inlet temperature is out of bounds for hot "
@@ -416,16 +422,47 @@ class Condenser(HeatExchanger):
             )
             logger.warning(msg)
         try:
-            self.eff_cold.val = (
+            self.eff_cold.val_SI = (
                 (self.outl[1].h.val_SI - self.inl[1].h.val_SI)
                 / self.calc_dh_max_cold()
             )
         except ValueError:
-            self.eff_cold.val = np.nan
+            self.eff_cold.val_SI = np.nan
             msg = (
                 f"Cannot calculate {self.label} cold side effectiveness "
                 "because hot side inlet temperature is out of bounds for cold "
                 "side fluid."
             )
             logger.warning(msg)
-        self.eff_max.val = max(self.eff_hot.val, self.eff_cold.val)
+        self.eff_max.val_SI = max(self.eff_hot.val_SI, self.eff_cold.val_SI)
+
+    def convergence_check(self):
+        o = self.outl[0]
+        if o.p.is_var:
+            fluid = single_fluid(o.fluid_data)
+            p_crit = o.fluid.wrapper[fluid]._p_crit
+            if o.p.val_SI > p_crit:
+                o.p.set_reference_val_SI(p_crit * 0.9)
+
+    def initialise_source(self, c, key):
+        r"""
+        Return a starting value for pressure and enthalpy at outlet.
+
+        Parameters
+        ----------
+        c : tespy.connections.connection.Connection
+            Connection to perform initialisation on.
+
+        key : str
+            Fluid property to retrieve.
+
+        Returns
+        -------
+        val : float
+            Starting value for pressure/enthalpy in SI units.
+        """
+        if c.source_id == 'out1':
+            if key == 'h':
+                return h_mix_pQ(c.p.val_SI, 0, c.fluid_data, c.mixing_rule)
+
+        return super().initialise_source(c, key)

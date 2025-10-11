@@ -16,6 +16,7 @@ from tespy.components.nodes.base import NodeBase
 from tespy.tools.data_containers import ComponentMandatoryConstraints as dc_cmc
 from tespy.tools.fluid_properties import dh_mix_dpQ
 from tespy.tools.fluid_properties import h_mix_pQ
+from tespy.tools.fluid_properties import single_fluid
 
 
 @component_registry
@@ -28,10 +29,11 @@ class DropletSeparator(NodeBase):
     **Mandatory Equations**
 
     - :py:meth:`tespy.components.nodes.base.NodeBase.mass_flow_func`
-    - :py:meth:`tespy.components.nodes.base.NodeBase.pressure_equality_func`
-    - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.fluid_func`
+    - :py:meth:`tespy.components.nodes.base.NodeBase.pressure_structure_matrix`
+    - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.fluid_structure_matrix`
     - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.energy_balance_func`
-    - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.outlet_states_func`
+    - saturated liquid: :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.saturated_outlet_func`
+    - saturated gas: :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.saturated_outlet_func`
 
     Inlets/Outlets
 
@@ -84,7 +86,10 @@ class DropletSeparator(NodeBase):
     >>> from tespy.components import Sink, Source, DropletSeparator
     >>> from tespy.connections import Connection
     >>> from tespy.networks import Network
-    >>> nw = Network(T_unit='C', p_unit='bar', h_unit='kJ / kg', iterinfo=False)
+    >>> nw = Network(iterinfo=False)
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg"
+    ... })
     >>> so = Source('two phase inflow')
     >>> sig = Sink('gas outflow')
     >>> sil = Sink('liquid outflow')
@@ -210,7 +215,8 @@ class DropletSeparator(NodeBase):
 
     def saturated_outlet_func(self, outconn=None, quality=None):
         r"""
-        Set the outlet state.
+        Set the outlet quality :math:`x` to be equal to 0 or 1 at the respective
+        outlet.
 
         Returns
         -------
@@ -219,13 +225,12 @@ class DropletSeparator(NodeBase):
 
             .. math::
 
-                0 = h_{out,1} - h\left(p, x=0 \right)\
+                0 = h_{out} - h\left(p, x=x \right)
         """
         o = self.outl[outconn]
         return h_mix_pQ(o.p.val_SI, quality, o.fluid_data) - o.h.val_SI
 
     def saturated_outlet_deriv(self, increment_filter, k, dependents=None, outconn=None, quality=None):
-
         o = self.outl[outconn]
         if o.p.is_var:
             self._partial_derivative(
@@ -241,12 +246,7 @@ class DropletSeparator(NodeBase):
 
     def fluid_structure_matrix(self, k):
         r"""
-        Calculate partial derivatives for all pressure equations.
-
-        Returns
-        -------
-        deriv : ndarray
-            Matrix with partial derivatives for the fluid equations.
+        Set the fluid strucutre matrix to force fluid composition equality.
         """
         for eq, conn in enumerate(self.outl):
             self._structure_matrix[k + eq, self.inl[0].fluid.sm_col] = 1
@@ -260,6 +260,15 @@ class DropletSeparator(NodeBase):
             branch["connections"] += [outconn]
             branch["components"] += [self]
             outconn.target.propagate_wrapper_to_target(branch)
+
+    def convergence_check(self):
+        # here all pressures are the same value
+        o = self.outl[0]
+        if o.p.is_var:
+            fluid = single_fluid(o.fluid_data)
+            p_crit = o.fluid.wrapper[fluid]._p_crit
+            if o.p.val_SI > p_crit:
+                o.p.set_reference_val_SI(p_crit * 0.9)
 
     @staticmethod
     def initialise_source(c, key):
@@ -278,17 +287,10 @@ class DropletSeparator(NodeBase):
         -------
         val : float
             Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                10^6 & \text{key = 'p'}\\
-                h\left(p, x=1 \right) & \text{key = 'h' at outlet 1}\\
-                h\left(p, x=0 \right) & \text{key = 'h' at outlet 2}
-                \end{cases}
         """
         if key == 'p':
-            return 10e5
+            fluid = single_fluid(c.fluid_data)
+            return c.fluid.wrapper[fluid]._p_crit / 2
         elif key == 'h':
             if c.source_id == 'out1':
                 return h_mix_pQ(c.p.val_SI, 0, c.fluid_data)
@@ -321,7 +323,8 @@ class DropletSeparator(NodeBase):
                 \end{cases}
         """
         if key == 'p':
-            return 10e5
+            fluid = single_fluid(c.fluid_data)
+            return c.fluid.wrapper[fluid]._p_crit / 2
         elif key == 'h':
             return h_mix_pQ(c.p.val_SI, 0.5, c.fluid_data)
 
@@ -345,4 +348,5 @@ class DropletSeparator(NodeBase):
                 'starting_point_value': self.inl[0].vol.val,
                 'ending_point_property': 'v',
                 'ending_point_value': self.outl[i].vol.val
-            } for i in range(2)}
+            } for i in range(2)
+        }

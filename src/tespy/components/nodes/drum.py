@@ -26,10 +26,11 @@ class Drum(DropletSeparator):
     **Mandatory Equations**
 
     - :py:meth:`tespy.components.nodes.base.NodeBase.mass_flow_func`
-    - :py:meth:`tespy.components.nodes.base.NodeBase.pressure_equality_func`
-    - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.fluid_func`
+    - :py:meth:`tespy.components.nodes.base.NodeBase.pressure_structure_matrix`
+    - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.fluid_structure_matrix`
     - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.energy_balance_func`
-    - :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.outlet_states_func`
+    - saturated liquid: :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.saturated_outlet_func`
+    - saturated gas: :py:meth:`tespy.components.nodes.droplet_separator.DropletSeparator.saturated_outlet_func`
 
     Inlets/Outlets
 
@@ -100,7 +101,10 @@ class Drum(DropletSeparator):
     >>> from tespy.tools.characteristics import CharLine
     >>> from tespy.tools.characteristics import load_default_char as ldc
     >>> import os
-    >>> nw = Network(T_unit='C', p_unit='bar', h_unit='kJ / kg', iterinfo=False)
+    >>> nw = Network(iterinfo=False)
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg"
+    ... })
     >>> fa = Source('feed ammonia')
     >>> amb_in = Source('air inlet')
     >>> amb_out = Sink('air outlet')
@@ -165,8 +169,7 @@ class Drum(DropletSeparator):
     def outlets():
         return ['out1', 'out2']
 
-    @staticmethod
-    def initialise_target(c, key):
+    def initialise_target(self, c, key):
         r"""
         Return a starting value for pressure and enthalpy at inlet.
 
@@ -182,17 +185,9 @@ class Drum(DropletSeparator):
         -------
         val : float
             Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                10^6 & \text{key = 'p'}\\
-                h\left(p, x=0 \right) & \text{key = 'h' at inlet 1}\\
-                h\left(p, x=0.7 \right) & \text{key = 'h' at inlet 2}
-                \end{cases}
         """
         if key == 'p':
-            return 10e5
+           return super().initialise_target(c, key)
         elif key == 'h':
             if c.target_id == 'in1':
                 return h_mix_pQ(c.p.val_SI, 0, c.fluid_data)

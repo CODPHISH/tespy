@@ -18,7 +18,10 @@ from tespy.tools import logger
 from tespy.tools.data_containers import ComponentCharacteristics as dc_cc
 from tespy.tools.data_containers import ComponentMandatoryConstraints as dc_cmc
 from tespy.tools.data_containers import ComponentProperties as dc_cp
+from tespy.tools.fluid_properties import h_mix_pQ
+from tespy.tools.fluid_properties import h_mix_pT
 from tespy.tools.fluid_properties import isentropic
+from tespy.tools.fluid_properties import single_fluid
 from tespy.tools.helpers import _get_dependents
 
 
@@ -29,12 +32,13 @@ class Pump(Turbomachine):
 
     **Mandatory Equations**
 
-    - :py:meth:`tespy.components.component.Component.fluid_func`
-    - :py:meth:`tespy.components.component.Component.mass_flow_func`
+    - fluid: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
+    - mass flow: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
 
     **Optional Equations**
 
-    - :py:meth:`tespy.components.component.Component.pr_func`
+    - :py:meth:`tespy.components.component.Component.pr_structure_matrix`
+    - :py:meth:`tespy.components.component.Component.dp_structure_matrix`
     - :py:meth:`tespy.components.turbomachinery.base.Turbomachine.energy_balance_func`
     - :py:meth:`tespy.components.turbomachinery.pump.Pump.eta_s_func`
     - :py:meth:`tespy.components.turbomachinery.pump.Pump.eta_s_char_func`
@@ -44,6 +48,10 @@ class Pump(Turbomachine):
 
     - in1
     - out1
+
+    Optional inlets
+
+    - power
 
     Image
 
@@ -89,8 +97,12 @@ class Pump(Turbomachine):
     eta_s : float, dict
         Isentropic efficiency, :math:`\eta_s/1`
 
-    pr : float, dict, :code:`"var"`
+    pr : float, dict
         Outlet to inlet pressure ratio, :math:`pr/1`
+
+    dp : float, dict
+        Inlet to outlet pressure difference, :math:`dp/\text{p}_\text{unit}`
+        Is specified in the Network's pressure unit
 
     eta_s_char : tespy.tools.characteristics.CharLine, dict
         Characteristic curve for isentropic efficiency, provide CharLine as
@@ -112,8 +124,10 @@ class Pump(Turbomachine):
     >>> from tespy.networks import Network
     >>> from tespy.tools.characteristics import CharLine
     >>> import os
-    >>> nw = Network(p_unit='bar', T_unit='C', h_unit='kJ / kg', v_unit='l / s',
-    ... iterinfo=False)
+    >>> nw = Network(iterinfo=False)
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC", "volumetric_flow": "l/s", "enthalpy": "kJ/kg"
+    ... })
     >>> si = Sink('sink')
     >>> so = Source('source')
     >>> pu = Pump('pump')
@@ -125,10 +139,10 @@ class Pump(Turbomachine):
     characteristic function for the pump efficiency. We can calulate the
     offdesign efficiency and the volumetric flow, if the difference pressure
     changed. The default characteristc lines are to be found in the
-    :py:mod:`tespy.data` module. Of course you are able to specify your own
-    characteristcs, like done for the :code:`flow_char`. More information on
-    how to specify characteristic functions are given in the corresponding part
-    of the online documentation.
+    :ref:`tespy.data <tespy_data_label>` module. Of course you are able to
+    specify your own characteristcs, like done for the :code:`flow_char`. More
+    information on how to specify characteristic functions are given in the
+    corresponding part of the online documentation.
 
     >>> v = np.array([0, 0.4, 0.8, 1.2, 1.6, 2]) / 1000
     >>> dp = np.array([15, 14, 12, 9, 5, 0]) * 1e5
@@ -178,7 +192,8 @@ class Pump(Turbomachine):
                 min_val=0, max_val=1, num_eq_sets=1,
                 func=self.eta_s_func,
                 dependents=self.eta_s_dependents,
-                deriv=self.eta_s_deriv
+                deriv=self.eta_s_deriv,
+                quantity="efficiency"
             ),
             'eta_s_char': dc_cc(
                 param='v', num_eq_sets=1,
@@ -232,7 +247,7 @@ class Pump(Turbomachine):
         i = self.inl[0]
         o = self.outl[0]
         return (
-            (o.h.val_SI - i.h.val_SI) * self.eta_s.val - (
+            (o.h.val_SI - i.h.val_SI) * self.eta_s.val_SI - (
                 isentropic(
                     i.p.val_SI,
                     i.h.val_SI,
@@ -262,7 +277,7 @@ class Pump(Turbomachine):
         f = self.eta_s_func
 
         if o.h.is_var and not i.h.is_var:
-            self._partial_derivative(o.h, k, self.eta_s.val, increment_filter)
+            self._partial_derivative(o.h, k, self.eta_s.val_SI, increment_filter)
             # remove o.h from the dependents
             dependents = dependents.difference(_get_dependents([o.h])[0])
 
@@ -365,6 +380,19 @@ class Pump(Turbomachine):
         i = self.inl[0]
         o = self.outl[0]
 
+        if o.h.is_var:
+            fluid = single_fluid(i.fluid_data)
+            if fluid is not None:
+                if i.p.val_SI < i.fluid_data[fluid]["wrapper"]._p_crit:
+                    if i.fluid_data[fluid]["wrapper"].back_end != "INCOMP":
+                        h_max = h_mix_pQ(i.p.val_SI, 0, i.fluid_data)
+
+                        if o.h.val_SI > h_max:
+                            o.h.set_reference_val_SI(h_max - 20e3)
+
+        if i.h.is_var and o.h.val_SI < i.h.val_SI:
+            i.h.set_reference_val_SI(o.h.val_SI - 10e3)
+
         if o.p.is_var and o.p.val_SI < i.p.val_SI:
             o.p.set_reference_val_SI(i.p.val_SI * 1.5)
 
@@ -375,9 +403,6 @@ class Pump(Turbomachine):
             i.p.set_reference_val_SI(o.p.val_SI * 2 / 3)
             i.p.val_SI = o.p.val_SI * 0.9
 
-        if i.h.is_var and o.h.val_SI < i.h.val_SI:
-            i.h.set_reference_val_SI(o.h.val_SI - 10e3)
-
         if i.m.is_var and self.flow_char.is_set:
             vol = i.calc_vol(T0=i.T.val_SI)
             expr = i.m.val_SI * vol
@@ -387,7 +412,7 @@ class Pump(Turbomachine):
                 i.m.set_reference_val_SI(self.flow_char.char_func.x[0] / vol)
 
     @staticmethod
-    def initialise_Source(c, key):
+    def initialise_source(c, key):
         r"""
         Return a starting value for pressure and enthalpy at outlet.
 
@@ -403,18 +428,28 @@ class Pump(Turbomachine):
         -------
         val : float
             Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                10^6 & \text{key = 'p'}\\
-                3 \cdot 10^5 & \text{key = 'h'}
-                \end{cases}
         """
+        fluid = single_fluid(c.fluid_data)
         if key == 'p':
-            return 10e5
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                return c.fluid.wrapper[fluid]._p_crit / 2
+            else:
+                return 10e5
         elif key == 'h':
-            return 3e5
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                temp = c.fluid.wrapper[fluid]._T_crit
+                if temp is None:
+                    temp = c.fluid.wrapper[fluid]._T_max
+
+                dT = temp - c.fluid.wrapper[fluid]._T_min
+
+                temp = temp - dT * 0.89
+            else:
+                # a pump with a mixture does not really make a lot of sense
+                temp = 300
+            return h_mix_pT(c.p.val_SI, temp, c.fluid_data, c.mixing_rule)
 
     @staticmethod
     def initialise_target(c, key):
@@ -433,18 +468,28 @@ class Pump(Turbomachine):
         -------
         val : float
             Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                10^5 & \text{key = 'p'}\\
-                2.9 \cdot 10^5 & \text{key = 'h'}
-                \end{cases}
         """
+        fluid = single_fluid(c.fluid_data)
         if key == 'p':
-            return 1e5
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                return c.fluid.wrapper[fluid]._p_crit / 2
+            else:
+                return 1e5
         elif key == 'h':
-            return 2.9e5
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                temp = c.fluid.wrapper[fluid]._T_crit
+                if temp is None:
+                    temp = c.fluid.wrapper[fluid]._T_max
+
+                dT = temp - c.fluid.wrapper[fluid]._T_min
+
+                temp = temp - dT * 0.9
+            else:
+                # a pump with a mixture does not really make a lot of sense
+                temp = 300
+            return h_mix_pT(c.p.val_SI, temp, c.fluid_data, c.mixing_rule)
 
     def calc_parameters(self):
         r"""Postprocessing parameter calculation."""
@@ -452,7 +497,7 @@ class Pump(Turbomachine):
 
         i = self.inl[0]
         o = self.outl[0]
-        self.eta_s.val =  (
+        self.eta_s.val_SI =  (
             isentropic(
                 i.p.val_SI,
                 i.h.val_SI,

@@ -1,15 +1,16 @@
 import numpy as np
 
-from tespy.connections.connection import _ConnectionBase
+from tespy.connections.connection import ConnectionBase
 from tespy.connections.connection import connection_registry
 from tespy.tools.data_containers import DataContainer as dc
 from tespy.tools.data_containers import FluidProperties as dc_prop
 from tespy.tools.helpers import TESPyConnectionError
 from tespy.tools.logger import logger
+from tespy.tools.units import SI_UNITS
 
 
 @connection_registry
-class PowerConnection(_ConnectionBase):
+class PowerConnection(ConnectionBase):
 
     def __init__(self, source, outlet_id, target, inlet_id, label=None, **kwargs):
         self._check_types(source, target)
@@ -153,21 +154,28 @@ class PowerConnection(_ConnectionBase):
         return {"E": self.E}
 
     def get_parameters(self):
-        return {"E": dc_prop(d=1e-4)}
+        return {"E": dc_prop(d=1e-4, quantity="power")}
 
-    def calc_results(self):
-        self.E.val = self.E.val_SI
+    def calc_results(self, units):
+        self.E.set_val_from_SI(units)
+        self.E.set_val0_from_SI(units)
         return True
 
-    def _set_design_params(self, data):
+    def _set_design_params(self, data, units):
         for var in self._result_attributes():
-            self.get_attr(var).design = float(data[var])
+            param = self.get_attr(var)
+            param.design = units.ureg.Quantity(
+                float(data[var]),
+                data[f"{var}_unit"]
+            ).to(SI_UNITS[param.quantity]).magnitude
 
-    def _set_starting_values(self, data):
+    def _set_starting_values(self, data, units):
         for prop in self.get_variables():
             var = self.get_attr(prop)
-            var.val0 = float(data[prop])
-            var.unit = data[prop + '_unit']
+            var.val0 = units.ureg.Quantity(
+                float(data[prop]),
+                data[f"{prop}_unit"]
+            )
 
     @classmethod
     def _print_attributes(cls):
@@ -203,11 +211,33 @@ class PowerConnection(_ConnectionBase):
 
         if self.source.__class__.__name__ in ["Motor", "Generator"]:
             source_connector = 0
+        elif self.source.__class__.__name__ in ["Turbine"]:
+            source_connector = 1
+        elif self.source.__class__.__name__ in ["SimpleHeatExchanger"]:
+            source_connector = 1
+        elif self.source.__class__.__name__ in ["PowerBus"]:
+            if self.source_id.startswith("power_out"):
+                s_id = self.source_id.removeprefix("power_out")
+                source_connector = 0 if s_id == "" else int(s_id) - 1
+            elif self.source_id.startswith("power_in"):
+                s_id = self.source_id.removeprefix("power_in")
+                source_connector = 0 if s_id == "" else int(s_id) - 1
         else:
             source_connector = 999
 
         if self.target.__class__.__name__ in ["Motor", "Generator"]:
             target_connector = 0
+        elif self.target.__class__.__name__ in ["Compressor", "Pump"]:
+            target_connector = 1
+        elif self.target.__class__.__name__ in ["SimpleHeatExchanger"]:
+            target_connector = 1
+        elif self.target.__class__.__name__ in ["PowerBus"]:
+            if self.target_id.startswith("power_in"):
+                t_id = self.target_id.removeprefix("power_in")
+                target_connector = 0 if t_id == "" else int(t_id) - 1
+            elif self.target_id.startswith("power_out"):
+                t_id = self.target_id.removeprefix("power_out")
+                target_connector = 0 if t_id == "" else int(t_id) - 1
         else:
             target_connector = 999
 

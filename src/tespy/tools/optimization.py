@@ -1,3 +1,13 @@
+# -*- coding: utf-8
+
+"""Module for OptimizationProblem class.
+
+This file is part of project TESPy (github.com/oemof/tespy). It's copyrighted
+by the contributors recorded in the version control history of the file,
+available from its original location tespy/tools/optimization.py
+
+SPDX-License-Identifier: MIT
+"""
 try:
     import pygmo as pg
 except ImportError:
@@ -38,6 +48,12 @@ class OptimizationProblem:
         Name of the objective(s). :code:`objective` is passed to the
         :code:`get_objectives` method of your tespy model instance.
 
+    minimize : list
+        Minimize (:code:`True`) or maximize an objective (:code:`False`). Must
+        be passed as list in same order as objective. E.g.
+        :code:`minimize=[True, False]` if the first objective should be
+        minimized and the second one maximized.
+
     Note
     ----
     For the required structure of the input dictionaries see the example in
@@ -53,7 +69,7 @@ class OptimizationProblem:
     documentation.
     """
 
-    def __init__(self, model, variables={}, constraints={}, objective=[]):
+    def __init__(self, model, variables={}, constraints={}, objective=[], minimize=None):
         if pg is None:
             msg = (
                 "For this function of TESPy pygmo has to be installed. Either"
@@ -80,6 +96,16 @@ class OptimizationProblem:
 
         self.objective_list = objective
         self.nobj = len(self.objective_list)
+        if minimize is None:
+            self.minimize = [True for _ in self.objective_list]
+        elif len(minimize) != self.nobj:
+            msg = (
+                "If you supply the minimize argument the number of values in "
+                "the list must be identical to the number of objectives."
+            )
+            raise ValueError(msg)
+        else:
+            self.minimize = minimize
 
         self.bounds = [[], []]
         for obj, data in self.variables.items():
@@ -186,12 +212,18 @@ class OptimizationProblem:
                     i += 1
 
         self.model.solve_model(**self.input_dict)
-        f1 = self.model.get_objectives(self.objective_list)
+        fitness = self.model.get_objectives(self.objective_list)
+
+        # negate the fitness function evaluation for minimize = False
+        # parenthesis around the -1 are required!
+        fitness = [
+            (-1) ** (sense + 1) * f for f, sense in zip(fitness, self.minimize)
+        ]
 
         cu = self.collect_constraints("upper")
         cl = self.collect_constraints("lower")
 
-        return f1 + cu + cl
+        return fitness + cu + cl
 
     def get_nobj(self):
         """Return number of objectives."""
@@ -262,4 +294,8 @@ class OptimizationProblem:
             evo += 1
 
         self._process_generation_data(evo, pop)
+        for obj, sense in zip(self.objective_list, self.minimize):
+            self.individuals[obj] = (
+                self.individuals[obj] * (-1) ** (sense + 1)
+            )
         return pop

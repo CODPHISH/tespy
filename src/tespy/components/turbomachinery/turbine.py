@@ -19,7 +19,10 @@ from tespy.tools.data_containers import ComponentCharacteristics as dc_cc
 from tespy.tools.data_containers import ComponentMandatoryConstraints as dc_cmc
 from tespy.tools.data_containers import ComponentProperties as dc_cp
 from tespy.tools.data_containers import SimpleDataContainer as dc_simple
+from tespy.tools.fluid_properties import h_mix_pQ
+from tespy.tools.fluid_properties import h_mix_pT
 from tespy.tools.fluid_properties import isentropic
+from tespy.tools.fluid_properties import single_fluid
 from tespy.tools.helpers import _get_dependents
 
 
@@ -28,18 +31,15 @@ class Turbine(Turbomachine):
     r"""
     Class for gas or steam turbines.
 
-    The component Turbine is the parent class for the components:
-
-    - :py:class:`tespy.components.turbomachinery.steam_turbine.SteamTurbine`
-
     **Mandatory Equations**
 
-    - :py:meth:`tespy.components.component.Component.fluid_func`
-    - :py:meth:`tespy.components.component.Component.mass_flow_func`
+    - fluid: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
+    - mass flow: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
 
     **Optional Equations**
 
-    - :py:meth:`tespy.components.component.Component.pr_func`
+    - :py:meth:`tespy.components.component.Component.dp_structure_matrix`
+    - :py:meth:`tespy.components.component.Component.pr_structure_matrix`
     - :py:meth:`tespy.components.turbomachinery.base.Turbomachine.energy_balance_func`
     - :py:meth:`tespy.components.turbomachinery.turbine.Turbine.eta_s_func`
     - :py:meth:`tespy.components.turbomachinery.turbine.Turbine.eta_s_char_func`
@@ -49,6 +49,10 @@ class Turbine(Turbomachine):
 
     - in1
     - out1
+
+    Optional outlets
+
+    - power
 
     Image
 
@@ -94,8 +98,12 @@ class Turbine(Turbomachine):
     eta_s : float, dict
         Isentropic efficiency, :math:`\eta_s/1`
 
-    pr : float, dict, :code:`"var"`
+    pr : float, dict
         Outlet to inlet pressure ratio, :math:`pr/1`
+
+    dp : float, dict
+        Inlet to outlet pressure difference, :math:`dp/\text{p}_\text{unit}`
+        Is specified in the Network's pressure unit
 
     eta_s_char : tespy.tools.characteristics.CharLine, dict
         Characteristic curve for isentropic efficiency, provide CharLine as
@@ -115,7 +123,11 @@ class Turbine(Turbomachine):
     >>> from tespy.networks import Network
     >>> from tespy.tools import ComponentCharacteristics as dc_cc
     >>> import os
-    >>> nw = Network(p_unit='bar', T_unit='C', h_unit='kJ / kg', iterinfo=False)
+    >>> nw = Network(iterinfo=False)
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg",
+    ...     "mass_flow": "t/h"
+    ... })
     >>> si = Sink('sink')
     >>> so = Source('source')
     >>> t = Turbine('turbine')
@@ -129,7 +141,7 @@ class Turbine(Turbomachine):
 
     >>> t.set_attr(eta_s=0.9, design=['eta_s'],
     ... offdesign=['eta_s_char', 'cone'])
-    >>> inc.set_attr(fluid={'water': 1}, m=10, T=550, p=110, design=['p'])
+    >>> inc.set_attr(fluid={'water': 1}, m=36, T=550, p=110, design=['p'])
     >>> outg.set_attr(p=0.5)
     >>> nw.solve('design')
     >>> nw.save('tmp.json')
@@ -137,7 +149,7 @@ class Turbine(Turbomachine):
     -10452574.0
     >>> round(outg.x.val, 3)
     0.914
-    >>> inc.set_attr(m=8)
+    >>> inc.set_attr(m=28.8)
     >>> nw.solve('offdesign', design_path='tmp.json')
     >>> round(t.eta_s.val, 3)
     0.898
@@ -193,7 +205,8 @@ class Turbine(Turbomachine):
                 min_val=0, max_val=1, num_eq_sets=1,
                 func=self.eta_s_func,
                 dependents=self.eta_s_dependents,
-                deriv=self.eta_s_deriv
+                deriv=self.eta_s_deriv,
+                quantity="efficiency"
             ),
             'eta_s_char': dc_cc(
                 param='m', num_eq_sets=1,
@@ -236,7 +249,7 @@ class Turbine(Turbomachine):
                     T0=inl.T.val_SI
                 )
                 - inl.h.val_SI
-            ) * self.eta_s.val
+            ) * self.eta_s.val_SI
         )
 
     def eta_s_deriv(self, increment_filter, k, dependents=None):
@@ -396,7 +409,7 @@ class Turbine(Turbomachine):
             o.p.set_reference_val_SI(i.p.val_SI * 2 /3)
 
     @staticmethod
-    def initialise_Source(c, key):
+    def initialise_source(c, key):
         r"""
         Return a starting value for pressure and enthalpy at outlet.
 
@@ -412,18 +425,24 @@ class Turbine(Turbomachine):
         -------
         val : float
             Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                5 \cdot 10^4 & \text{key = 'p'}\\
-                1.5 \cdot 10^6 & \text{key = 'h'}
-                \end{cases}
         """
         if key == 'p':
-            return 0.5e5
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                return c.fluid.wrapper[fluid]._p_crit / 2
+            else:
+                return 1e5
         elif key == 'h':
-            return 1.5e6
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                if c.p.val_SI >= c.fluid.wrapper[fluid]._p_crit:
+                    temp = c.fluid.wrapper[fluid]._T_crit * 1.2
+                    return h_mix_pT(c.p.val_SI, temp, c.fluid_data)
+                else:
+                    return h_mix_pQ(c.p.val_SI, 1, c.fluid_data, c.mixing_rule)
+            else:
+                temp = 1000
+                return h_mix_pT(c.p.val_SI, temp, c.fluid_data, c.mixing_rule)
 
     @staticmethod
     def initialise_target(c, key):
@@ -442,23 +461,29 @@ class Turbine(Turbomachine):
         -------
         val : float
             Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                2.5 \cdot 10^6 & \text{key = 'p'}\\
-                2 \cdot 10^6 & \text{key = 'h'}
-                \end{cases}
         """
         if key == 'p':
-            return 2.5e6
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                return c.fluid.wrapper[fluid]._p_crit / 4 * 3
+            else:
+                return 10e5
         elif key == 'h':
-            return 2e6
+            fluid = single_fluid(c.fluid_data)
+            if fluid is not None:
+                if c.p.val_SI >= c.fluid.wrapper[fluid]._p_crit:
+                    temp = c.fluid.wrapper[fluid]._T_crit * 1.4
+                    return h_mix_pT(c.p.val_SI, temp, c.fluid_data)
+                else:
+                    return h_mix_pQ(c.p.val_SI, 1, c.fluid_data, c.mixing_rule) + 1e5
+            else:
+                temp = 500
+                return h_mix_pT(c.p.val_SI, temp, c.fluid_data, c.mixing_rule)
 
     def calc_parameters(self):
         r"""Postprocessing parameter calculation."""
         super().calc_parameters()
-        self.eta_s.val = self.calc_eta_s()
+        self.eta_s.val_SI = self.calc_eta_s()
 
     def exergy_balance(self, T0):
         r"""

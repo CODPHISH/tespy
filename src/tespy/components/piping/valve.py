@@ -18,7 +18,6 @@ from tespy.tools import logger
 from tespy.tools.data_containers import ComponentCharacteristics as dc_cc
 from tespy.tools.data_containers import ComponentMandatoryConstraints as dc_cmc
 from tespy.tools.data_containers import ComponentProperties as dc_cp
-from tespy.tools.helpers import convert_to_SI
 
 
 @component_registry
@@ -28,12 +27,13 @@ class Valve(Component):
 
     **Mandatory Equations**
 
-    - :py:meth:`tespy.components.component.Component.fluid_func`
-    - :py:meth:`tespy.components.component.Component.mass_flow_func`
+    - fluid: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
+    - mass flow: :py:meth:`tespy.components.component.Component.variable_equality_structure_matrix`
 
     **Optional Equations**
 
-    - :py:meth:`tespy.components.component.Component.pr_func`
+    - :py:meth:`tespy.components.component.Component.dp_structure_matrix`
+    - :py:meth:`tespy.components.component.Component.pr_structure_matrix`
     - :py:meth:`tespy.components.component.Component.zeta_func`
     - :py:meth:`tespy.components.piping.valve.Valve.dp_char_func`
 
@@ -100,7 +100,10 @@ class Valve(Component):
     >>> from tespy.connections import Connection
     >>> from tespy.networks import Network
     >>> import os
-    >>> nw = Network(p_unit='bar', T_unit='C', iterinfo=False)
+    >>> nw = Network(iterinfo=False)
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC"
+    ... })
     >>> so = Source('source')
     >>> si = Sink('sink')
     >>> v = Valve('valve')
@@ -130,29 +133,20 @@ class Valve(Component):
     30.0
     >>> os.remove('tmp.json')
     """
-
-    def _preprocess(self, num_nw_vars):
-        if self.dp.is_set:
-            self.dp.val_SI = convert_to_SI('p', self.dp.val, self.inl[0].p.unit)
-
-        super()._preprocess(num_nw_vars)
-
     def get_parameters(self):
         return {
             'pr': dc_cp(
                 min_val=1e-4, max_val=1, num_eq_sets=1,
                 structure_matrix=self.pr_structure_matrix,
-                func=self.pr_func,
-                dependents=self.pr_dependents,
                 func_params={'pr': 'pr'},
+                quantity="ratio"
             ),
             'dp': dc_cp(
                 min_val=0,
                 num_eq_sets=1,
                 structure_matrix=self.dp_structure_matrix,
-                func=self.dp_func,
-                dependents=self.dp_dependents,
-                func_params={"inconn": 0, "outconn": 0, "dp": "dp"}
+                func_params={"inconn": 0, "outconn": 0, "dp": "dp"},
+                quantity="pressure"
             ),
             'zeta': dc_cp(
                 min_val=0, max_val=1e15, num_eq_sets=1,
@@ -247,72 +241,13 @@ class Valve(Component):
             dependents += [self.inl[0].h]
         return dependents
 
-    def initialise_source(self, c, key):
-        r"""
-        Return a starting value for pressure and enthalpy at outlet.
-
-        Parameters
-        ----------
-        c : tespy.connections.connection.Connection
-            Connection to perform initialisation on.
-
-        key : str
-            Fluid property to retrieve.
-
-        Returns
-        -------
-        val : float
-            Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                4 \cdot 10^5 & \text{key = 'p'}\\
-                5 \cdot 10^5 & \text{key = 'h'}
-                \end{cases}
-        """
-        if key == 'p':
-            return 4e5
-        elif key == 'h':
-            return 5e5
-
-    def initialise_target(self, c, key):
-        r"""
-        Return a starting value for pressure and enthalpy at inlet.
-
-        Parameters
-        ----------
-        c : tespy.connections.connection.Connection
-            Connection to perform initialisation on.
-
-        key : str
-            Fluid property to retrieve.
-
-        Returns
-        -------
-        val : float
-            Starting value for pressure/enthalpy in SI units.
-
-            .. math::
-
-                val = \begin{cases}
-                5 \cdot 10^5 & \text{key = 'p'}\\
-                5 \cdot 10^5 & \text{key = 'h'}
-                \end{cases}
-        """
-        if key == 'p':
-            return 5e5
-        elif key == 'h':
-            return 5e5
-
     def calc_parameters(self):
         r"""Postprocessing parameter calculation."""
         i = self.inl[0]
         o = self.outl[0]
-        self.pr.val = o.p.val_SI / i.p.val_SI
+        self.pr.val_SI = o.p.val_SI / i.p.val_SI
         self.dp.val_SI = i.p.val_SI - o.p.val_SI
-        self.dp.val = i.p.val - o.p.val
-        self.zeta.val = self.calc_zeta(i, o)
+        self.zeta.val_SI = self.calc_zeta(i, o)
 
     def entropy_balance(self):
         r"""

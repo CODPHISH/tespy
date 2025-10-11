@@ -12,40 +12,38 @@ available from its original location tespy/networks/networks.py
 
 SPDX-License-Identifier: MIT
 """
-import importlib # 支持动态导入，实现插件化架构
+import importlib
 import json
 import math
 import os
+import warnings
 from time import time
 
 import numpy as np
 import pandas as pd
 from numpy.linalg import norm
-from tabulate import tabulate # 结果的美观输出
+from tabulate import tabulate
 
 from tespy.components.component import component_registry
 from tespy.connections import Bus
 from tespy.connections import Connection
-from tespy.connections import Ref
-from tespy.connections.connection import _ConnectionBase
+from tespy.connections.connection import ConnectionBase
 from tespy.connections.connection import connection_registry
-from tespy.tools import fluid_properties as fp
 from tespy.tools import helpers as hlp
 from tespy.tools import logger
 from tespy.tools.characteristics import CharLine
 from tespy.tools.characteristics import CharMap
 from tespy.tools.data_containers import ComponentCharacteristicMaps as dc_cm
-from tespy.tools.data_containers import ComponentCharacteristics as dc_cc # 组件特性
-from tespy.tools.data_containers import ComponentProperties as dc_cp # 组件属性
+from tespy.tools.data_containers import ComponentCharacteristics as dc_cc
+from tespy.tools.data_containers import ComponentProperties as dc_cp
 from tespy.tools.data_containers import DataContainer as dc
 from tespy.tools.data_containers import FluidProperties as dc_prop
-from tespy.tools.data_containers import GroupedComponentCharacteristics as dc_gcc
-from tespy.tools.data_containers import GroupedComponentProperties as dc_gcp
 from tespy.tools.data_containers import ScalarVariable as dc_scavar
 from tespy.tools.data_containers import VectorVariable as dc_vecvar
-from tespy.tools.fluid_properties.wrappers import wrapper_registry
 from tespy.tools.global_vars import ERR
 from tespy.tools.global_vars import fluid_property_data as fpd
+from tespy.tools.units import SI_UNITS
+from tespy.tools.units import Units
 
 # Only require cupy if Cuda shall be used
 try:
@@ -60,48 +58,22 @@ class Network:
 
     Parameters
     ----------
-    h_range : list
-        List with minimum and maximum values for enthalpy value range.
-
-    h_unit : str
-        Specify the unit for enthalpy: 'J / kg', 'kJ / kg', 'MJ / kg'.
-
     iterinfo : boolean
         Print convergence progress to console.
+
+    h_range : list
+        List with minimum and maximum values for enthalpy value range.
 
     m_range : list
         List with minimum and maximum values for mass flow value range.
 
-    m_unit : str
-        Specify the unit for mass flow: 'kg / s', 't / h'.
-
     p_range : list
         List with minimum and maximum values for pressure value range.
 
-    p_unit : str
-        Specify the unit for pressure: 'Pa', 'psi', 'bar', 'MPa'.
-
-    s_unit : str
-        Specify the unit for specific entropy: 'J / kgK', 'kJ / kgK',
-        'MJ / kgK'.
-
-    T_unit : str
-        Specify the unit for temperature: 'K', 'C', 'F', 'R'.
-
-    v_unit : str
-        Specify the unit for volumetric flow: 'm3 / s', 'm3 / h', 'l / s',
-        'l / h'.
-
-    vol_unit : str
-        Specify the unit for specific volume: 'm3 / kg', 'l / kg'.
-
-    x_unit : str
-        Specify the unit for steam mass fraction: '-', '%'.
-
     Note
     ----
-    Unit specification is optional: If not specified the SI unit (first
-    element in above lists) will be applied!
+    Units are specified via the :code:`Network.units.set_defaults` interface.
+    The specification is optional and will use SI units by default.
 
     Range specification is optional, too. The value range is used to stabilize
     the newton algorithm. For more information see the "getting started"
@@ -109,16 +81,18 @@ class Network:
 
     Example
     -------
-    Basic example for a setting up a tespy.networks.network.Network object.
-    Specifying the fluids is mandatory! Unit systems, fluid property range and
-    iterinfo are optional.
+    Basic example for a setting up a :code:`tespy.networks.network.Network`
+    object.
 
     Standard value for iterinfo is :code:`True`. This will print out
     convergence progress to the console. You can stop the printouts by setting
     this property to :code:`False`.
 
     >>> from tespy.networks import Network
-    >>> mynetwork = Network(p_unit='bar', T_unit='C')
+    >>> mynetwork = Network()
+    >>> mynetwork.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC"
+    ... })
     >>> mynetwork.set_attr(p_range=[1, 10])
     >>> type(mynetwork)
     <class 'tespy.networks.network.Network'>
@@ -138,7 +112,10 @@ class Network:
     >>> from tespy.networks import Network
     >>> from tespy.components import Source, Sink, Pipe, PowerSink
     >>> from tespy.connections import Connection, PowerConnection
-    >>> nw = Network(T_unit='C', p_unit='bar', v_unit='m3 / s')
+    >>> nw = Network()
+    >>> nw.units.set_defaults(**{
+    ...     "pressure": "bar", "temperature": "degC"
+    ... })
     >>> so = Source('source')
     >>> si = Sink('sink')
     >>> p = Pipe('pipe', Q=0, pr=0.95, printout=False, power_connector_location="outlet")
@@ -161,16 +138,10 @@ class Network:
 
     def _serialize(self):
         return {
-            "m_unit": self.m_unit,
-            "m_range": list(self.m_range),
-            "p_unit": self.p_unit,
-            "p_range": list(self.p_range),
-            "h_unit": self.h_unit,
-            "h_range": list(self.h_range),
-            "T_unit": self.T_unit,
-            "x_unit": self.x_unit,
-            "v_unit": self.v_unit,
-            "s_unit": self.s_unit,
+            "m_range": list(self.m_range.magnitude),
+            "p_range": list(self.p_range.magnitude),
+            "h_range": list(self.h_range.magnitude),
+            "units": self.units._serialize()
         }
 
     def set_defaults(self):
@@ -207,12 +178,12 @@ class Network:
         self.checked = False
         self.design_path = None
         self.iterinfo = True
+        self.units = Units()
 
         msg = 'Default unit specifications:\n'
-        for prop, data in fpd.items():
+        for prop, unit in self.units.default.items():
             # standard unit set
-            self.__dict__.update({prop + '_unit': data['SI_unit']})
-            msg += data['text'] + ': ' + data['SI_unit'] + '\n'
+            msg += f"{prop}: {unit}" + "\n"
 
         # don't need the last newline
         logger.debug(msg[:-1])
@@ -222,14 +193,23 @@ class Network:
         self.p_range_SI = [2e2, 300e5]
         self.h_range_SI = [1e3, 7e6]
 
-        for prop in ['m', 'p', 'h']:
-            limits = self.get_attr(prop + '_range_SI')
+        property_names = {"m": "mass_flow", "p": "pressure", "h": "enthalpy"}
+        for prop, name in property_names.items():
+            limits = self.get_attr(f"{prop}_range_SI")
             msg = (
-                f"Default {fpd[prop]['text']} limits\n"
-                f"min: {limits[0]} {self.get_attr(prop + '_unit')}\n"
-                f"max: {limits[1]} {self.get_attr(prop + '_unit')}"
+                f"Default {name} limits\n"
+                f"min: {limits[0]} {self.units._quantities[name]}\n"
+                f"max: {limits[1]} {self.units._quantities[name]}"
             )
             logger.debug(msg)
+
+            unit = self.units.default[name]
+            key = f"{prop}_range"
+            self.__dict__.update({
+                key: self.units.ureg.Quantity(
+                    np.array(self.get_attr(f"{key}_SI")), unit
+                )
+            })
 
     def set_attr(self, **kwargs):
         r"""
@@ -237,70 +217,68 @@ class Network:
 
         Parameters
         ----------
-        h_range : list
-            List with minimum and maximum values for enthalpy value range.
-
-        h_unit : str
-            Specify the unit for enthalpy: 'J / kg', 'kJ / kg', 'MJ / kg'.
-
         iterinfo : boolean
             Print convergence progress to console.
+
+        h_range : list
+            List with minimum and maximum values for enthalpy value range.
 
         m_range : list
             List with minimum and maximum values for mass flow value range.
 
-        m_unit : str
-            Specify the unit for mass flow: 'kg / s', 't / h'.
-
         p_range : list
             List with minimum and maximum values for pressure value range.
-
-        p_unit : str
-            Specify the unit for pressure: 'Pa', 'psi', 'bar', 'MPa'.
-
-        s_unit : str
-            Specify the unit for specific entropy: 'J / kgK', 'kJ / kgK',
-            'MJ / kgK'.
-
-        T_unit : str
-            Specify the unit for temperature: 'K', 'C', 'F', 'R'.
-
-        v_unit : str
-            Specify the unit for volumetric flow: 'm3 / s', 'm3 / h', 'l / s',
-            'l / h'.
-
-        vol_unit : str
-            Specify the unit for specific volume: 'm3 / kg', 'l / kg'.
         """
+        self.units = kwargs.get('units', self.units)
+        unit_replace = {
+            "C": "degC",
+            "J / kgK": "J / (kg * K)",
+            "kJ / kgK": "kJ / (kg * K)",
+            "MJ / kgK": "MJ / (kg * K)",
+        }
         # unit sets
+        msg = None
         for prop in fpd.keys():
             unit = f'{prop}_unit'
             if unit in kwargs:
-                if kwargs[unit] in fpd[prop]['units']:
-                    self.__dict__.update({unit: kwargs[unit]})
-                    msg = f'Setting {fpd[prop]["text"]} unit: {kwargs[unit]}.'
-                    logger.debug(msg)
-                else:
-                    keys = ', '.join(fpd[prop]['units'].keys())
-                    msg = f'Allowed units for {fpd[prop]["text"]} are: {keys}'
-                    logger.error(msg)
-                    raise ValueError(msg)
+                if msg is None:
+                    msg = (
+                        "The API for specification of units in a Network "
+                        "changed. The old variant will be removed in the next "
+                        "major release. Please use the "
+                        "'Network.units.set_defaults' method instead."
+                    )
+                # for backwards compatibility: Update in the default units
+                self.units.set_defaults(**{
+                    fpd[prop]["text"].replace(" ", "_"):
+                    unit_replace.get(kwargs[unit], kwargs[unit])
+                })
+
+        if msg:
+            warnings.warn(msg, FutureWarning)
 
         for prop in ['m', 'p', 'h']:
-            if f'{prop}_range' in kwargs:
-                if isinstance(kwargs[f'{prop}_range'], list):
+            key = f"{prop}_range"
+            if key in kwargs:
+                if isinstance(kwargs[key], list):
+                    quantity = fpd[prop]["text"].replace(" ", "_")
+                    unit = self.units.default[quantity]
                     self.__dict__.update({
-                        f'{prop}_range_SI': [hlp.convert_to_SI(
-                            prop, value,
-                            self.get_attr(f'{prop}_unit')
-                        ) for value in kwargs[f'{prop}_range']]
+                        key: self.units.ureg.Quantity(
+                            np.array(kwargs[key]),
+                            unit
+                        )
+                    })
+                    self.__dict__.update({
+                        f"{key}_SI":
+                        self.get_attr(key).to(SI_UNITS[quantity]).magnitude
                     })
                 else:
                     msg = f'Specify the range as list: [{prop}_min, {prop}_max]'
                     logger.error(msg)
                     raise TypeError(msg)
 
-                limits = self.get_attr(f'{prop}_range_SI')
+                limits = self.get_attr(f'{key}_SI')
                 msg = (
                     f'Setting {fpd[prop]["text"]} limits\n'
                     f'min: {limits[0]} {fpd[prop]["SI_unit"]}\n'
@@ -308,20 +286,10 @@ class Network:
                 )
                 logger.debug(msg)
 
-        # update non SI value ranges
-        for prop in ['m', 'p', 'h']:
-            SI_range = self.get_attr(f'{prop}_range_SI')
-            self.__dict__.update({
-                f'{prop}_range': [hlp.convert_from_SI(
-                    prop, SI_value,
-                    self.get_attr(f'{prop}_unit')
-                ) for SI_value in SI_range]
-            })
-
         self.iterinfo = kwargs.get('iterinfo', self.iterinfo)
 
         if not isinstance(self.iterinfo, bool):
-            msg = ('Network parameter iterinfo must be True or False!')
+            msg = 'Network parameter iterinfo must be True or False!'
             logger.error(msg)
             raise TypeError(msg)
 
@@ -461,7 +429,7 @@ class Network:
             :code:`add_conns(c1, c2, c3, ...)`.
         """
         for c in args:
-            if not isinstance(c, _ConnectionBase):
+            if not isinstance(c, ConnectionBase):
                 msg = (
                     'Must provide tespy.connections.connection.Connection '
                     'objects as parameters.'
@@ -732,60 +700,16 @@ class Network:
         logger.info(msg)
 
     def _check_connections(self):
-        r"""
-        检查连接的重复使用问题
-
-        这个方法验证网络拓扑的物理合理性，确保：
-        1. 每个组件的出口端口只能连接到一个目标（防止"分流"错误）
-        2. 每个组件的入口端口只能接收一个源的输入（防止"合流"错误）
-
-        物理意义：
-        - 出口重复：一个管道出口不能同时连接到两个不同的设备
-        - 入口重复：一个设备入口不能同时接收两根管道的流体
-
-        正确的分流/合流应该使用专门的Splitter/Merger组件
-        """
-
-        # =================================================================
-        # 检查源端口（出口）的重复使用
-        # =================================================================
-
-        # 使用pandas的duplicated()方法找出重复的(source, source_id)组合
-        # duplicated()返回布尔Series，标记除第一次出现外的重复项为True
+        r"""Check connections for multiple usage of inlets or outlets."""
         dub = self.conns.loc[self.conns.duplicated(["source", "source_id"])]
-
-        # 示例：假设有以下错误的连接配置
-        # c1: pump.out1 → tank1.in1
-        # c2: pump.out1 → tank2.in1  ← 这是重复使用pump.out1的错误连接
-        #
-        # self.conns DataFrame可能如下：
-        #     object  source source_id target target_id
-        # c1    c1    pump    out1    tank1    in1
-        # c2    c2    pump    out1    tank2    in1     ← 这行会被duplicated()标记
-        #
-        # dub DataFrame将包含c2这一行（重复的连接记录）
-
-        # 遍历每个重复使用的源端口连接
         for c in dub['object']:
-
-            # 收集所有连接到同一源端口的目标信息，用于错误报告
             targets = []
-
-            # 创建掩码，找出所有连接到同一个源端口的连接
-            # 使用.values是为了进行元素级比较，避免索引对齐问题
             mask = (
                 (self.conns["source"].values == c.source)
                 & (self.conns["source_id"].values == c.source_id)
             )
-
-            # 遍历所有匹配的连接，收集目标信息用于错误消息
-            # 对于上面的示例，mask会匹配c1和c2两行
             for conns in self.conns.loc[mask, "object"]:
-                # 格式化目标信息：组件标签(端口ID)
                 targets += [f"\"{conns.target.label}\" ({conns.target_id})"]
-
-            # 将目标列表转换为逗号分隔的字符串
-            # 示例：targets = ["tank1" (in1), "tank2" (in1)]
             targets = ", ".join(targets)
 
             msg = (
@@ -794,19 +718,7 @@ class Network:
                 "Please check your network configuration."
             )
             logger.error(msg)
-
-            # 示例错误消息：
-            # "The source "pump" (out1) is attached to more than one component
-            #  on the target side: "tank1" (in1), "tank2" (in1).
-            #  Please check your network configuration."
-
-            # 抛出异常，程序立即终止，不会执行第二次迭代
-            # 虽然 dub 可能包含多个重复项，但实际执行只报告一次错误
             raise hlp.TESPyNetworkError(msg)
-
-        # =================================================================
-        # 检查目标端口（入口）的重复使用
-        # =================================================================
 
         dub = self.conns.loc[
             self.conns.duplicated(['target', 'target_id'])
@@ -828,43 +740,6 @@ class Network:
             logger.error(msg)
             raise hlp.TESPyNetworkError(msg)
 
-        # =================================================================
-        # 正确的网络配置示例和建议
-        # =================================================================
-
-        # ❌ 错误的分流配置：
-        # pump.out1 → tank1.in1
-        # pump.out1 → tank2.in1  # 错误：重复使用pump.out1
-
-        # ✅ 正确的分流配置：
-        # pump.out1 → splitter.in1
-        # splitter.out1 → tank1.in1
-        # splitter.out2 → tank2.in1
-
-        # ❌ 错误的合流配置：
-        # pump1.out1 → tank.in1
-        # pump2.out1 → tank.in1  # 错误：重复使用tank.in1
-
-        # ✅ 正确的合流配置：
-        # pump1.out1 → merger.in1
-        # pump2.out1 → merger.in2
-        # merger.out1 → tank.in1
-
-        # =================================================================
-        # 检查通过后的保证
-        # =================================================================
-
-        # 如果这个方法成功执行（没有抛出异常），则保证：
-        # 1. 每个组件的每个出口端口最多连接一个目标
-        # 2. 每个组件的每个入口端口最多接收一个源
-        # 3. 网络拓扑在连接层面是物理合理的
-        # 4. 后续的求解过程不会因为连接冲突而失败
-
-        # 注意：这个检查只验证连接的唯一性，不检查：
-        # - 连接的完整性（组件是否有未连接的端口）
-        # - 连接的有效性（端口是否在组件定义中存在）
-        # 这些检查在其他方法中完成
-
     def _init_connection_result_datastructure(self):
 
         for conn_type in self.conns["conn_type"].unique():
@@ -881,59 +756,24 @@ class Network:
                 self.results[conn_type] = pd.DataFrame(columns=cols, dtype='float64')
 
     def _init_components(self):
-        r"""
-        设置必要的组件信息
-
-        这个方法为网络中的每个组件建立与连接的映射关系，并初始化数据管理结构。
-        主要完成以下工作：
-        1. 识别并验证组件的物质流入口和出口连接
-        2. 识别并验证组件的功率入口和出口连接
-        3. 设置组件的连接属性（包括物质流和功率连接）
-        4. 为每种组件类型创建结果存储DataFrame
-        """
-
-        # 遍历网络中已注册的组件实例
+        r"""Set up necessary component information."""
         for comp in self.comps["object"]:
-
-            # =================================================================
-            # 识别并验证组件的物质流出口连接（组件作为连接的源头）
-            # =================================================================
-
-            # 创建源组件匹配掩码，找出当前组件作为source的所有连接
+            # get incoming and outgoing connections of a component
             source_mask = self.conns["source"] == comp
-            # 创建有效性连接器掩码，找出当前组件出口端作为source_id的所有连接
             required_connectors_mask = self.conns["source_id"].isin(comp.outlets())
-
-            # 示例：假设Pump类定义的出口为['out1']
-            # 如果有人错误地创建了 pump.out2 → tank.in1 的连接
-            # required_connectors_mask 会排除这个无效连接，因为'out2'不在comp.outlets()中
-
-            # 组合两个掩码查询source连接：既要是当前组件的连接，又要是有效的连接器
             sources = self.conns[source_mask & required_connectors_mask]
-            # 按source_id排序并获取连接标签列表，确保连接顺序一致性
             sources = sources["source_id"].sort_values().index.tolist()
-
-            # =================================================================
-            # 识别并验证组件的物质流入口连接（组件作为连接的目标）
-            # =================================================================
-
             target_mask = self.conns["target"] == comp
             required_connectors_mask = self.conns["target_id"].isin(comp.inlets())
             targets = self.conns[target_mask & required_connectors_mask]
             targets = targets["target_id"].sort_values().index.tolist()
-
-            # 将入口连接的Connection对象存储到组件的inl属性中
+            # save the incoming and outgoing as well as the number of
+            # connections as component attribute
             comp.inl = self.conns.loc[targets, "object"].tolist()
-            # 将出口连接的Connection对象存储到组件的outl属性中
             comp.outl = self.conns.loc[sources, "object"].tolist()
-            # 获取组件类定义的期望连接数量
             comp.num_i = len(comp.inlets())
             comp.num_o = len(comp.outlets())
 
-            # =================================================================
-            # 识别并验证组件的功率出口连接
-            # 功率连接用于电力、机械功率等能量传递，不同于物质流连接
-            # =================================================================
             required_connectors_mask = self.conns["source_id"].isin(comp.poweroutlets())
             sources = self.conns[source_mask & required_connectors_mask]
             sources = sources["source_id"].sort_values().index.tolist()
@@ -947,40 +787,21 @@ class Network:
             comp.num_power_i = len(comp.powerinlets())
             comp.num_power_o = len(comp.poweroutlets())
 
-            # 获取组件的类名，如'Pump', 'HeatExchanger', 'Motor'等
+            # set up restults and specification dataframes
             comp_type = comp.__class__.__name__
-            # 检查是否已经为该组件类型创建了结果DataFrame
             if comp_type not in self.results:
-                # 从组件参数中筛选出ComponentProperties类型的参数
-                # 这些参数的计算结果需要存储，如效率、功率、压比等
                 cols = [
-                    col for col, data in comp.parameters.items()
-                    if isinstance(data, dc_cp)  # dc_cp = ComponentProperties
+                    c for col, data in comp.parameters.items()
+                    if isinstance(data, dc_cp)
+                    for c in [col, f"{col}_unit"]
                 ]
-                # 为该组件类型创建结果DataFrame
                 self.results[comp_type] = pd.DataFrame(
                     columns=cols, dtype='float64'
                 )
 
-                # 示例：创建后的结构
-                # self.results['Motor'] = 空DataFrame，列名可能包含['P', 'eta', 'torque']
-                # self.results['Generator'] = 空DataFrame，列名可能包含['P', 'eta', 'frequency']
-
     def _check_components(self):
-        r"""
-        检查组件的连接完整性
-
-        这个方法验证网络中每个组件的实际连接数量是否与组件类定义的期望连接数量匹配。
-        包括物质流连接和功率连接的完整性检查。
-
-        检查内容：
-        1. 验证每个组件的物质流出口连接数量
-        2. 验证每个组件的物质流入口连接数量
-        3. 验证每个组件的功率出口连接数量（如果有功率连接）
-        4. 验证每个组件的功率入口连接数量（如果有功率连接）
-
-        如果发现连接不完整，会抛出异常。
-        """
+        # count number of incoming and outgoing connections and compare to
+        # expected values
         for comp in self.comps['object']:
             if len(comp.outl) != comp.num_o:
                 msg = (
@@ -1030,55 +851,55 @@ class Network:
 
     def _prepare_problem(self):
         r"""
-        根据计算模式初始化网络求解问题
+        Initilialise the network depending on calclation mode.
 
-        Design 设计模式
+        Design
 
-        - 初始化通用流体组成和流体物性
-        - 如果提供了初始化路径，从中加载初始值
+        - Generic fluid composition and fluid property initialisation.
+        - Starting values from initialisation path if provided.
 
-        Offdesign 非设计模式
+        Offdesign
 
-        - 检查非设计模式路径规范
-        - 设置组件和连接的设计点属性
-        - 切换参数规范从设计模式到非设计模式
+        - Check offdesign path specification.
+        - Set component and connection design point properties.
+        - Switch from design/offdesign parameter specification.
         """
-        # 跟踪总线方程、组件方程和连接方程的数量以及组件变量的数量
+        # keep track of the number of bus, component and connection equations
+        # as well as number of component variables
         self.num_bus_eq = 0
         self.num_comp_eq = 0
         self.num_conn_eq = 0
         self.variable_counter = 0
         self.variables_dict = {}
 
-        # 在多进程计算中，所有连接都会被复制
-        # 质量流分支和流体分支持有对原始运行中连接的引用（network.checked为False的情况）
-        # 但变量空间等的分配是在连接的副本上进行的，这些副本与质量流分支和流体分支不再对应
-        # 因此，拓扑简化不适用于复制的网络，需要重新创建分支
-        # 通过检查网络是否持有包含某些连接的质量流分支，并将其与网络中实际存在的连接对象进行比较来检测
+        # in multiprocessing copies are made of all connections
+        # the mass flow branches and fluid branches hold references to
+        # connections from the original run (where network.checked is False)
+        # The assignment of variable spaces etc. is however made on the
+        # copies of the connections which do not correspond to the mass flow
+        # branches and fluid branches anymore. So the topology simplification
+        # does not actually apply to the copied network, therefore the
+        # branches have to be recreated for this case. We can detect that by
+        # checking whether a network holds a massflow branch with some
+        # connections and compare that with the connection object actually
+        # present in the network
         for k, v in self.fluid_wrapper_branches.items():
-            # 检测流体分支中引用的 Connection 是否等于 network 当前持有的对象
-            # 如果不相等，说明是复制的网络（在并行计算中），需要重新创建流体分支，避免引用错误
             if self.conns.loc[v["connections"][0].label, "object"] != v["connections"][0]:
                 self._create_fluid_wrapper_branches()
             continue
 
-        # 在流体分支间传播流体属性（组成、物性包等）
         self._propagate_fluid_wrappers()
-        # 为连接结果创建数据结构（DataFrame）
         self._init_connection_result_datastructure()
-        # 根据求解模式（design/offdesign）准备参数设置
         self._prepare_solve_mode()
-        # 将用户指定的单位转换为SI单位进行内部计算
+        # this method will distribute units and set SI values from given values
+        # and units
         self._init_set_properties()
-        # 创建结构矩阵：定义变量之间的依赖关系
         self._create_structure_matrix()
 
-        # 预求解：处理一些可以提前确定的变量和方程
         self._presolve()
-        # 为求解器准备最终的数据结构
         self._prepare_for_solver()
 
-        # 初始化所有连接上的流体物性初值，确保物性函数可以正常调用
+        # generic fluid property initialisation
         self._init_properties()
 
         msg = 'Network initialised.'
@@ -1311,80 +1132,32 @@ class Network:
                 self.variable_counter += 1
 
     def _create_structure_matrix(self):
-        """
-        创建求解问题的结构矩阵
-
-        这个方法构建求解器需要的核心数据结构：
-        1. 结构矩阵：描述方程和变量的关系
-        2. 右端项：方程的常数项
-        3. 变量查找表：变量编号到对象的映射
-        4. 方程查找表：方程编号到对象的映射
-        """
-
-        # =================================================================
-        # 初始化数据结构
-        # =================================================================
-
-        # 结构矩阵：稀疏矩阵，存储雅可比矩阵的结构信息
-        # 格式：{(行号, 列号): 系数}
         self._structure_matrix = {}
-
-        # 右端项：方程组的右端常数项
-        # 格式：{方程编号: 常数值}
         self._rhs = {}
-
-        # 变量查找表：从变量编号映射到变量的父对象和属性名
-        # 格式：{变量编号: {"object": 对象, "property": 属性名}}
         self._variable_lookup = {}
-
-        # 对象到变量的反向查找表
-        # 格式：{对象: {属性名: 变量编号}}
         self._object_to_variable_lookup = {}
-
-        # 方程集查找表：从方程编号映射到方程信息
-        # 格式：{方程编号: (对象标签, 方程名)}
         self._equation_set_lookup = {}
-
-        # 预求解的方程列表
         self._presolved_equations = []
-
-        # 参考容器查找表：用于处理线性相关变量
         self._reference_container_lookup = {}
-
-        # 方程查找表：最终求解阶段的方程映射
         self._equation_lookup = {}
-
-        # 关联矩阵：存储方程对变量的依赖关系
         self._incidence_matrix = {}
 
-        # 为所有连接和组件的变量分配编号
         num_vars = self._prepare_variables()
 
+        self._reassign_ude_objects()
+
         sum_eq = 0
-        # 连接的预处理主要处理流体连续性方程、能量守恒等
         sum_eq = self._preprocess_network_parts(self.conns["object"], sum_eq)
-        # 组件的预处理
         sum_eq = self._preprocess_network_parts(self.comps["object"], sum_eq)
-        # 用户自定义方程预处理
         sum_eq = self._preprocess_network_parts(self.user_defined_eq.values(), sum_eq)
 
-        # =================================================================
-        # 寻找线性相关变量
-        # =================================================================
-
-        # 分析结构矩阵，找出线性相关的变量
-        # 例如：在某些连接中，压力或焓值可能由其他变量唯一确定
         _linear_dependencies = self._find_linear_dependent_variables(
             self._structure_matrix, self._rhs
         )
-
-        # 提取所有线性相关的变量编号
         _linear_dependent_variables = [
             var for linear_dependents in _linear_dependencies
             for var in linear_dependents["variables"]
         ]
-
-        # 处理独立变量（不线性相关的变量）
         _missing_variables = [
             {
                 "variables": [var],
@@ -1395,15 +1168,8 @@ class Network:
             }
             for var in set(range(num_vars)) - set(_linear_dependent_variables)
         ]
-
-        # 合并线性相关和独立变量的信息
         self._variable_dependencies = _missing_variables + _linear_dependencies
 
-        # =================================================================
-        # 设置参考容器
-        # =================================================================
-
-        # 为每组线性相关的变量创建参考容器
         for linear_dependents in self._variable_dependencies:
             reference_variable = self._variable_lookup[
                 linear_dependents["reference"]
@@ -1456,14 +1222,13 @@ class Network:
                 container._factor = linear_dependents["factors"][variable]
                 container._offset = linear_dependents["offsets"][variable]
 
-        # 将用户设定的值传递给参考容器
+        # impose set values in the reference containers
         for conn in self.conns["object"]:
             for prop, container in conn.get_variables().items():
                 if conn.get_attr(prop).is_set:
                     conn.get_attr(prop).set_reference_val_SI(conn.get_attr(prop)._val_SI)
 
-        # 收集所有可以预先求解的方程编号
-        # 这些方程不需要迭代求解，可以直接计算结果
+        # collect all presolved equations
         self._presolved_equations = [
             indices
             for dependents in self._variable_dependencies
@@ -1517,140 +1282,42 @@ class Network:
                 )
         return num_vars
 
+    def _reassign_ude_objects(self):
+        for ude in self.user_defined_eq.values():
+            ude.conns = [self.get_conn(c.label) for c in ude.conns]
+            ude.comps = [self.get_comp(c.label) for c in ude.comps]
+
     def _preprocess_network_parts(self, parts, eq_counter):
-        """
-        预处理网络部件（连接、组件、用户定义方程）
-        对于每个网络部件（组件、连接等），调用其_preprocess方法
 
-        参数:
-        parts: 网络部件列表（可能是组件列表、连接列表等）
-        eq_counter: 当前方程计数器
-
-        返回:
-        更新后的方程计数器
-        """
         for obj in parts:
-            # obj可能是
-            # 1. Component对象（如Valve、Pump、HeatExchanger等）
-            # 2. Connection对象（连接两个组件的管道）
-            # 3. UserDefinedEquation对象（用户自定义方程）
-            # 调用对象的预处理方法
             obj._preprocess(eq_counter)
-
-            # 收集对象构建的结构矩阵信息
-            # 结构矩阵描述了雅可比矩阵的稀疏结构
             self._structure_matrix.update(obj._structure_matrix)
-
-            # 收集对象构建的右端项信息，残差向量
             self._rhs.update(obj._rhs)
-
-            # 建立方程编号到方程名称的映射
             eq_map = {
                 eq_num: (obj.label, eq_name)
                 for eq_num, eq_name in obj._equation_set_lookup.items()
             }
             self._equation_set_lookup.update(eq_map)
-
-            # 更新方程计数器
-            # obj.num_eq是该对象贡献的方程数量
             eq_counter += obj.num_eq
 
         return eq_counter
 
     def _find_linear_dependent_variables(self, sparse_matrix, rhs):
-        edges_with_factors = []
-        rhs_offsets = {}
-        eq_idx = {}  # The equation indices keep track of which equations to eliminate
-
         if len(sparse_matrix) == 0:
             return []
 
-        num_rows = 1 + max([k[0] for k in sparse_matrix.keys()])
-        num_cols = 1 + max([k[1] for k in sparse_matrix.keys()])
-
-        # Convert sparse matrix to dense form
-        dense_matrix = np.zeros((num_rows, num_cols))
-        for idx, value in sparse_matrix.items():
-            dense_matrix[idx] = value
-
-        # Extract edges and offsets from rows with two non-zero entries
-        for row_idx in range(num_rows):
-            non_zero_indices = [
-                col_idx for col_idx, value
-                in enumerate(dense_matrix[row_idx]) if value != 0
-            ]
-            non_zero_values = [
-                dense_matrix[row_idx, col_idx] for col_idx in non_zero_indices
-            ]
-
-            if len(non_zero_indices) == 2:
-                col1, col2 = non_zero_indices
-                val1, val2 = non_zero_values
-                factor = -val1 / val2
-                offset = rhs[row_idx] / val2
-                edges_with_factors.append((col1, col2, factor))
-                rhs_offsets[(col1, col2)] = offset
-                if (col1, col2) in eq_idx:
-                    variables = self._get_variables_before_presolve_by_number([col1, col2])
-                    equations = self._get_equation_sets_by_eq_set_number(
-                        [eq_idx[(col1, col2)], row_idx]
-                    )
-                    msg = (
-                        f"The variables "
-                        f"{', '.join([str(v) for v in variables])} are "
-                        "directly linked with two equations "
-                        f"{', '.join([str(e) for e in equations])}. This "
-                        "overdetermines the problem."
-                    )
-                    raise hlp.TESPyNetworkError(msg)
-
-                eq_idx[(col1, col2)] = row_idx
-
-        # Build adjacency list for the graph
-        adjacency_list = {}
-        for col1, col2, factor in edges_with_factors:
-            if col1 not in adjacency_list:
-                adjacency_list[col1] = []
-            if col2 not in adjacency_list:
-                adjacency_list[col2] = []
-
-            # Add edge with factor and reverse edge with reciprocal value
-            adjacency_list[col1].append((col2, factor))
-            adjacency_list[col2].append((col1, 1 / factor))
-
+        adjacency_list, eq_idx, edges_with_factors, rhs_offsets = (
+            self._build_graph(sparse_matrix, rhs)
+        )
         # Detect cycles (to check for circular dependencies)
-        visited = set()
-        edge_list = []
-
-        def dfs_cycle(node, parent):
-            visited.add(node)
-            for neighbor, _ in adjacency_list.get(node, []):
-                if neighbor not in visited:
-                    edge_list.append(tuple(sorted([neighbor, node])))
-                    if dfs_cycle(neighbor, node):
-                        return True
-                elif neighbor != parent:  # A back edge is found
-                    edge_list.append(tuple(sorted([neighbor, node])))
-                    return True
-            return False
-
-        for node in adjacency_list:
-            if node not in visited:
-                if dfs_cycle(node, None):
-                    cycling_eqs = [v for k, v in eq_idx.items() if k in edge_list]
-                    variable_names = self._get_variables_before_presolve_by_number(visited)
-                    equations = self._get_equation_sets_by_eq_set_number(cycling_eqs)
-                    msg = (
-                        "A circular dependency between the variables "
-                        f"{', '.join([str(v) for v in variable_names])} "
-                        "caused by the equations "
-                        f"{', '.join([str(e) for e in equations])} has been "
-                        "detected. This overdetermines the problem."
-                    )
-                    raise hlp.TESPyNetworkError(msg)
+        cycle = self._find_cycles_in_graph(
+            {k: [x[0] for x in v] for k, v in adjacency_list.items()}
+        )
+        if cycle is not None:
+            self._raise_error_if_cycle(cycle, edges_with_factors, eq_idx)
 
         # Find connected components and compute factors/offsets
-        visited.clear()
+        visited = set()
         variables_factors_offsets = []
 
         def dfs_component(node, current_factor, current_offset):
@@ -1709,57 +1376,117 @@ class Network:
 
         return variables_factors_offsets
 
-    def _map_column_indices_to_variable_names(self, cycle):
-        return cycle
+    def _build_graph(self, sparse_matrix, rhs):
+        edges_with_factors = []
+        rhs_offsets = {}
+        eq_idx = {}
+        # The equation indices keep track of which equations to eliminate
+        # Extract edges and offsets from rows with two non-zero entries
+        rows = {k[0] for k in sparse_matrix}
+        # sorting needs to be applied to always have same orientation on edges
+        # otherwise duplicate edges are not found if one is just in reverse
+        rows_with_cols = {
+            row: sorted([k[1] for k in sparse_matrix if k[0] == row])
+            for row in rows
+        }
+        for row, cols in rows_with_cols.items():
+            if len(cols) == 2:
+                non_zero_values = (
+                    sparse_matrix[(row, cols[0])], sparse_matrix[(row, cols[1])]
+                )
+                col1, col2 = cols
+                val1, val2 = non_zero_values
+                factor = -val1 / val2
+                offset = rhs[row] / val2
+                edges_with_factors.append((col1, col2, factor))
+                rhs_offsets[(col1, col2)] = offset
+                if (col1, col2) in eq_idx:
+                    variables = self._get_variables_before_presolve_by_number([col1, col2])
+                    equations = self._get_equation_sets_by_eq_set_number(
+                        [eq_idx[(col1, col2)], row]
+                    )
+                    msg = (
+                        "The variables "
+                        f"{', '.join([str(v) for v in variables])} are "
+                        "directly linked with two equations "
+                        f"{', '.join([str(e) for e in equations])}. This "
+                        "overdetermines the problem."
+                    )
+                    raise hlp.TESPyNetworkError(msg)
+
+                eq_idx[(col1, col2)] = row
+
+        # Build adjacency list for the graph
+        adjacency_list = {}
+        for col1, col2, factor in edges_with_factors:
+            if col1 not in adjacency_list:
+                adjacency_list[col1] = []
+            if col2 not in adjacency_list:
+                adjacency_list[col2] = []
+
+            # Add edge with factor and reverse edge with reciprocal value
+            adjacency_list[col1].append((col2, factor))
+            adjacency_list[col2].append((col1, 1 / factor))
+
+        return adjacency_list, eq_idx, edges_with_factors, rhs_offsets
+
+    def _find_cycles_in_graph(self, graph):
+        visited = set()
+        parent = {}
+
+        def dfs(node, prev):
+            visited.add(node)
+            for neighbor in graph.get(node, []):
+                if neighbor not in visited:
+                    parent[neighbor] = node
+                    result = dfs(neighbor, node)
+                    if result:
+                        return result
+                elif neighbor != prev:
+                    # Cycle found, reconstruct it
+                    cycle = [neighbor, node]
+                    while cycle[-1] != neighbor:
+                        cycle.append(parent[cycle[-1]])
+                    cycle.reverse()
+                    return cycle
+            return None
+
+        for node in graph:
+            if node not in visited:
+                parent[node] = None
+                cycle = dfs(node, None)
+                if cycle:
+                    return set(cycle)
+
+        return None
+
+    def _raise_error_if_cycle(self, cycle, edges_with_factors, eq_idx):
+        edge_list = [
+            e[:2] for e in edges_with_factors
+            if e[0] in cycle or e[1] in cycle
+        ]
+        cycling_eqs = [v for k, v in eq_idx.items() if k in edge_list]
+        variable_names = self._get_variables_before_presolve_by_number(cycle)
+        equations = self._get_equation_sets_by_eq_set_number(cycling_eqs)
+        msg = (
+            "A circular dependency between the variables "
+            f"{', '.join([str(v) for v in variable_names])} "
+            "caused by the equations "
+            f"{', '.join([str(e) for e in equations])} has been "
+            "detected. This overdetermines the problem."
+        )
+        raise hlp.TESPyNetworkError(msg)
 
     def _create_fluid_wrapper_branches(self):
 
-        # 初始化流体包装器分支字典
-        # 存储格式：{分支名: {"connections": [连接列表], "components": [组件列表]}}
         self.fluid_wrapper_branches = {}
-
-        # =================================================================
-        # 识别流体属性起始组件
-        # =================================================================
-
-        # 创建掩码，筛选出能够定义流体属性的特殊组件类型
         mask = self.comps["comp_type"].isin(
             ["Source", "CycleCloser", "WaterElectrolyzer", "FuelCell"]
         )
-
-        # 各组件类型的物理意义：
-        # - Source: 流体来源，如水源、空气入口、燃料供应等 通常在此处定义流体的初始组成和物性
-        # - CycleCloser: 循环闭合器，用于闭合热力循环 定义循环工质的基准状态
-        # - WaterElectrolyzer: 水电解器，产生氢气和氧气 定义产物气体的组成和纯度
-        # - FuelCell: 燃料电池，消耗氢气和氧气产生水 定义反应物和产物的流体属性
-
-        # 获取所有符合条件的起始组件对象
         start_components = self.comps["object"].loc[mask]
 
-        # 遍历每个起始组件，让它们各自构建自己的流体传播分支
         for start in start_components:
             self.fluid_wrapper_branches.update(start.start_fluid_wrapper_branch())
-
-        # 示例：执行后可能得到
-        # self.fluid_wrapper_branches = {
-        #     "water_source_branch": {
-        #         "connections": [c1, c2, c3],  # 水流路径上的连接
-        #         "components": [water_source, pump, tank]  # 水流路径上的组件
-        #     },
-        #     "air_source_branch": {
-        #         "connections": [c4, c5],  # 空气流路径上的连接
-        #         "components": [air_source, compressor]  # 空气流路径上的组件
-        #     }
-        # }
-
-        # =================================================================
-        # 合并有交集的流体包装器分支
-        # =================================================================
-
-        # 为什么需要合并？
-        # 在复杂网络中，不同起始组件的流体传播路径可能会交汇，
-        # 例如：水和空气在混合器中汇合，或者在换热器中进行热交换。
-        # 如果不合并，会导致同一个连接被多个分支管理，产生冲突。
 
         merged = self.fluid_wrapper_branches.copy()
         for branch_name, branch_data in self.fluid_wrapper_branches.items():
@@ -1782,15 +1509,6 @@ class Network:
                         break
 
         self.fluid_wrapper_branches = merged
-
-        # 示例：合并后的最终结果可能是
-        # self.fluid_wrapper_branches = {
-        #     "water_source_branch": {
-        #         "connections": [c1, c2, c3, c4, c5],  # 包含了所有相关连接
-        #         "components": [water_source, pump, tank, mixer, heat_exchanger]
-        #     }
-        #     # air_source_branch被合并到water_source_branch中了
-        # }
 
     def _presolve(self):
         # handle the fluid vector variables
@@ -1937,42 +1655,32 @@ class Network:
                 c.good_starting_values = False
 
             for key in c.property_data:
-                # read unit specifications
-                prop = key.split("_ref")[0]
                 if "fluid" in key:
                     continue
-                elif key == "E":
-                    c.get_attr(key).unit = "W"
-                elif key == 'Td_bp':
-                    c.get_attr(key).unit = self.get_attr('T_unit')
-                else:
-                    c.get_attr(key).unit = self.get_attr(f"{prop}_unit")
-                # set SI value
-                if c.get_attr(key).is_set:
-                    # this could be externalized to either
-                    # the connections class or actually the data containers
+
+                param = c.get_attr(key)
+                if param.is_set:
                     if "ref" in key:
-                        if prop == 'T':
-                            c.get_attr(key).ref.delta_SI = hlp.convert_to_SI(
-                                'Td_bp', c.get_attr(key).ref.delta,
-                                c.get_attr(prop).unit
-                            )
-                        else:
-                            c.get_attr(key).ref.delta_SI = hlp.convert_to_SI(
-                                prop, c.get_attr(key).ref.delta,
-                                c.get_attr(prop).unit
-                            )
-                    elif key == "E":
-                        c.E.val_SI = c.E.val
+                        unit = self.units.default[param.quantity]
+                        param.ref.delta_SI = self.units.ureg.Quantity(
+                            param.ref.delta,
+                            unit
+                        ).to(SI_UNITS[param.quantity]).magnitude
                     else:
-                        c.get_attr(key).val_SI = hlp.convert_to_SI(
-                            key, c.get_attr(key).val, c.get_attr(key).unit
-                        )
+                        param.set_SI_from_val(self.units)
         msg = (
             "Updated fluid property SI values and fluid mass fraction for user "
             "specified connection parameters."
         )
         logger.debug(msg)
+
+        for cp in self.comps["object"]:
+            for param, value in cp.parameters.items():
+                if isinstance(value, dc_prop) and (value.is_set or value.is_var):
+                    if np.isnan(value._val):
+                        value.val = (value.min_val + value.max_val) / 2
+                    value.set_SI_from_val(self.units)
+
 
     def _init_design(self):
         r"""
@@ -2024,7 +1732,6 @@ class Network:
             b.comps['P_ref'] = np.nan
 
         series = pd.Series(dtype='float64')
-        _local_design_paths = {}
         for cp in self.comps['object']:
             c = cp.__class__.__name__
             # read design point information of components with
@@ -2118,7 +1825,7 @@ class Network:
                     param = c.get_attr(var)
                     param.is_set = True
                     param.val_SI = param.design
-                    param.val = hlp.convert_from_SI(var, param.val_SI, param.unit)
+                    param.set_val_from_SI(self.units)
 
                 c.new_design = False
 
@@ -2141,7 +1848,8 @@ class Network:
 
                     # take nominal values from design point
                     if isinstance(data, dc_cp):
-                        cp.get_attr(var).val = cp.get_attr(var).design
+                        data.val_SI = data.design
+                        data.set_val_from_SI(self.units)
                         switched = True
                         msg += var + ', '
 
@@ -2273,7 +1981,7 @@ class Network:
             raise hlp.TESPyNetworkError(msg)
 
         data = df.loc[c.label]
-        c._set_design_params(data)
+        c._set_design_params(data, self.units)
 
     def _init_conn_params_from_path(self, c, df):
         r"""
@@ -2294,7 +2002,7 @@ class Network:
             return
 
         data = df.loc[c.label]
-        c._set_starting_values(data)
+        c._set_starting_values(data, self.units)
         c.good_starting_values = True
 
     def _init_properties(self):
@@ -2331,19 +2039,23 @@ class Network:
                     logger.warning(msg)
 
             for key, variable in c.get_variables().items():
+                # for connections variables can be presolved and not be var anymore
                 if variable.is_var:
                     if not c.good_starting_values:
                         self.init_val0(c, key)
 
-                    variable.val_SI = hlp.convert_to_SI(
-                        key, variable.val0, variable.unit
-                    )
-                    variable._reference_container.val_SI = variable.get_reference_val_SI()
+                    variable.set_SI_from_val0(self.units)
+                    # variable.set_SI_from_val0()
+                    variable.set_reference_val_SI(variable._val_SI)
 
         for cp in self.comps["object"]:
             for key, variable in cp.get_variables().items():
-                if variable.is_var:
-                    variable._reference_container.val_SI = variable.get_reference_val_SI()
+                # for components every variable should be an actual variable
+                # if variable.is_var:
+                if np.isnan(variable.val):
+                    variable.val = 1.0
+                variable.set_SI_from_val(self.units)
+                variable.set_reference_val_SI(variable._val_SI)
 
         for c in self.conns['object']:
             c._precalc_guess_values()
@@ -2367,7 +2079,9 @@ class Network:
             # starting value for mass flow is random between 1 and 2 kg/s
             # (should be generated based on some hash maybe?)
             if key == 'm':
-                c.get_attr(key).val0 = float(np.random.random() + 1)
+                seed = abs(hash(c.label)) % (2**32)
+                rng = np.random.default_rng(seed=seed)
+                value = float(rng.random() + 1)
 
             # generic starting values for pressure and enthalpy
             elif key in ['p', 'h']:
@@ -2377,23 +2091,23 @@ class Network:
 
                 if val_s == 0 and val_t == 0:
                     if key == 'p':
-                        c.get_attr(key).val0 = 1e5
+                        value = 1e5
                     elif key == 'h':
-                        c.get_attr(key).val0 = 1e6
+                        value = 1e6
 
                 elif val_s == 0:
-                    c.get_attr(key).val0 = val_t
+                    value = val_t
                 elif val_t == 0:
-                    c.get_attr(key).val0 = val_s
+                    value = val_s
                 else:
-                    c.get_attr(key).val0 = (val_s + val_t) / 2
+                    value = (val_s + val_t) / 2
 
-                # change value according to specified unit system
-                c.get_attr(key).val0 = hlp.convert_from_SI(
-                    key, c.get_attr(key).val0, self.get_attr(key + '_unit')
-                )
             elif key == 'E':
-                c.get_attr(key).val0 = 0.0
+                value = 0.0
+
+            # these values are SI, so they are set to the respective variable
+            c.get_attr(key).set_reference_val_SI(value)
+            c.get_attr(key).set_val0_from_SI(self.units)
 
     @staticmethod
     def _load_network_state(json_path):
@@ -2414,6 +2128,7 @@ class Network:
                 with pd.option_context("future.no_silent_downcasting", True):
                     dfs[key] = pd.DataFrame.from_dict(value, orient="index").fillna(np.nan)
                 dfs[key].index = dfs[key].index.astype(str)
+        # TODO: depricate
         # this is for compatibility of older savestates
         else:
             key = "Connection"
@@ -2698,44 +2413,32 @@ class Network:
         For more information on the solution process have a look at the online
         documentation at tespy.readthedocs.io in the section "TESPy modules".
         """
-
-        # =================================================================
-        # 初始化和验证
-        # =================================================================
-
-        # 设置求解状态，99表示未开始求解
+        ## to own function
         self.status = 99
         self.new_design = False
-
-        # 比较当前设计路径和之前的检查是否需要重新设计
         if self.design_path == design_path and design_path is not None:
-            # 遍历所有连接，检查是否有新的设计参数
             for c in self.conns['object']:
                 if c.new_design:
                     self.new_design = True
                     break
-            # 如果连接没有新设计，检查组件
             if not self.new_design:
                 for cp in self.comps['object']:
                     if cp.new_design:
                         self.new_design = True
                         break
 
-        # 设计路径改变标记为新设计
         else:
             self.new_design = True
 
-        # 保存求解参数到实例变量，供其他方法使用
-        self.init_path = init_path          # 初始值路径
-        self.design_path = design_path      # 设计工况路径
-        self.max_iter = max_iter            # 最大迭代次数
-        self.min_iter = min_iter            # 最小迭代次数
-        self.init_previous = init_previous  # 是否使用前次计算结果作为初值
-        self.iter = 0                       # 当前迭代次数
-        self.use_cuda = use_cuda            # 是否使用GPU加速
-        self.robust_relax = robust_relax    # 是否使用稳健松弛算法
+        self.init_path = init_path
+        self.design_path = design_path
+        self.max_iter = max_iter
+        self.min_iter = min_iter
+        self.init_previous = init_previous
+        self.iter = 0
+        self.use_cuda = use_cuda
+        self.robust_relax = robust_relax
 
-        # CUDA 可用性检查
         if self.use_cuda and cu is None:
             msg = (
                 'Specifying use_cuda=True requires cupy to be installed on '
@@ -2744,7 +2447,6 @@ class Network:
             logger.warning(msg)
             self.use_cuda = False
 
-        # 验证求解模式
         if mode not in ['offdesign', 'design']:
             msg = 'Mode must be "design" or "offdesign".'
             logger.error(msg)
@@ -2752,15 +2454,9 @@ class Network:
         else:
             self.mode = mode
 
-        # =================================================================
-        # 网络拓扑检查
-        # =================================================================
-
-        # 如果网络拓扑未检查过，进行检查
         if not self.checked:
             self.check_topology()
 
-        # 记录求解配置信息，用于调试和日志
         msg = (
             "Solver properties:\n"
             f" - mode: {self.mode}\n"
@@ -2771,7 +2467,6 @@ class Network:
         )
         logger.debug(msg)
 
-        # 记录网络规模信息
         msg = (
             "Network information:\n"
             f" - Number of components: {len(self.comps)}\n"
@@ -2780,24 +2475,17 @@ class Network:
         )
         logger.debug(msg)
 
-        # 准备求解问题的数学模型
         self._prepare_problem()
 
-        # 如果只进行初始化，不进行实际求解，则返回
         if init_only:
             return
 
-        # =================================================================
-        # 数值求解
-        # =================================================================
         msg = 'Starting solver.'
         logger.info(msg)
 
-        # 检查方程数和变量数是否匹配（可解性检查）
         self.solve_determination()
 
         try:
-            # 执行牛顿法迭代求解
             self.solve_loop(print_results=print_results)
         except ValueError as e:
             self.status = 99
@@ -2806,19 +2494,12 @@ class Network:
             self.unload_variables()
             return
 
-        # 清理变量空间，释放内存
         self.unload_variables()
 
-        # =================================================================
-        # 错误处理和后处理
-        # =================================================================
-
-        # 检查是否出现奇异性（方程组不可解）
         if self.status == 3:
             logger.error(self.singularity_msg)
             return
 
-        # 检查是否收敛失败
         if self.status == 2:
             msg = (
                 'The solver does not seem to make any progress, aborting '
@@ -2830,7 +2511,6 @@ class Network:
             logger.warning(msg)
             return
 
-        # 求解成功，进行后处理计算
         self.postprocessing()
 
         msg = 'Calculation complete.'
@@ -2875,6 +2555,8 @@ class Network:
             if (
                     self.iter >= self.min_iter - 1
                     and (self.residual_history[-2:] < ERR ** 0.5).all()
+                    # the increment should also be small
+                    and (abs(self.increment) < ERR ** 0.5).all()
                 ):
                 self.status = 0
                 break
@@ -3210,10 +2892,10 @@ class Network:
                 for fluid in data["obj"].is_var:
                     data["obj"]._val[fluid] /= total_mass_fractions
 
-
-        for c in self.conns['object']:
-            # check the fluid properties for physical ranges
-            c._adjust_to_property_limits(self)
+        if norm(self.increment) > 1e-1:
+            for c in self.conns['object']:
+                # check the fluid properties for physical ranges
+                c._adjust_to_property_limits(self)
 
         # second check based on component heuristics
         # - for first three iterations
@@ -3296,7 +2978,7 @@ class Network:
     def postprocessing(self):
         r"""Calculate connection, bus and component parameters."""
         _converged = self.process_connections()
-        _converged = _converged and self.process_components()
+        _converged = self.process_components() and _converged
         self.process_busses()
 
         if self.status == 0 and not _converged:
@@ -3311,10 +2993,7 @@ class Network:
                 variable_dict = self._variable_lookup[variable_num]
                 variable = variable_dict["object"].get_attr(variable_dict["property"])
                 if variable_dict["property"] != "fluid":
-                    if isinstance(variable, dc_cp):
-                        variable.val = variable.val
-                    else:
-                        variable.val_SI = variable.val_SI
+                    variable.val_SI = variable.val_SI
                 else:
                     variable.val = variable.val
                 variable._reference_container = None
@@ -3324,7 +3003,7 @@ class Network:
         _converged = True
         for c in self.conns['object']:
             c.good_starting_values = True
-            _converged = _converged and c.calc_results()
+            _converged = c.calc_results(self.units) and _converged
             self.results[c.__class__.__name__].loc[c.label] = c.collect_results(self.all_fluids)
         return _converged
 
@@ -3335,15 +3014,48 @@ class Network:
         for cp in self.comps['object']:
             cp.calc_parameters()
             _converged = _converged and cp.check_parameter_bounds()
+            # this thing could be somewhere else
+            for key, value in cp.parameters.items():
+                if isinstance(value, dc_prop):
+                    result = value._get_val_from_SI(self.units)
+                    if (
+                        value.is_set
+                        and not value.is_var
+                        and not np.isclose(result.magnitude, value.val, 1e-3, 1e-3)
+                        and not cp.bypass
+                    ):
+                        _converged = False
+                        msg = (
+                            "The simulation converged but the calculated "
+                            f"result {result} for the fixed input parameter "
+                            f"{key} is not equal to the originally specified "
+                            f"value: {value.val}. Usually, this can happen, "
+                            "when a method internally manipulates the "
+                            "associated equation during iteration in order to "
+                            "allow progress in situations, when the equation "
+                            "is otherwise not well defined for the current"
+                            "values of the variables, e.g. in case a negative "
+                            "root would need to be evaluated.  Often, this "
+                            "can happen during the first iterations and then "
+                            "will resolve itself as convergence progresses. "
+                            "In this case it did not, meaning convergence was "
+                            "not actually achieved."
+                        )
+                        logger.warning(msg)
+                        self.status = 2
+                    else:
+                        if not value.is_set or value.is_var:
+                            value.set_val_from_SI(self.units)
 
+        if self.status == 2:
+            return False
+
+        for cp in self.comps['object']:
             key = cp.__class__.__name__
-            for param in self.results[key].columns:
-                p = cp.get_attr(param)
-                if (p.func is not None or (p.func is None and p.is_set) or
-                        p.is_result):
-                    self.results[key].loc[cp.label, param] = p.val
-                else:
-                    self.results[key].loc[cp.label, param] = np.nan
+            result = cp.collect_results()
+            if len(result) == 0:
+                continue
+            self.results[cp.__class__.__name__].loc[cp.label] = result
 
         return _converged
 
@@ -3413,6 +3125,9 @@ class Network:
         result = ""
         for cp in self.comps['comp_type'].unique():
             df = self.results[cp].copy()
+            for c in df.index:
+                if not self.get_comp(c).printout:
+                    df = df.drop(c)
             # are there any parameters to print?
             if df.size > 0:
                 if subsystem is not None:
@@ -3422,9 +3137,14 @@ class Network:
                     ]
                     df = df.loc[component_labels]
 
-                cols = df.columns
+                c = self.comps.loc[self.comps["comp_type"] == cp, "object"]
+                cols = [
+                    col for col in c.iloc[0]._get_result_attributes()
+                    if not col.endswith("_unit")
+                ]
                 if len(cols) > 0:
-                    for col in cols:
+                    df = df[cols].dropna(axis=1, how="all")
+                    for col in df.columns:
                         df[col] = df.apply(
                             self._color_component_prints, axis=1,
                             args=(col, colored, coloring))
@@ -3529,12 +3249,14 @@ class Network:
         comp = self.get_comp(c.name)
         if comp.printout:
             # select parameter from results DataFrame
-            val = c[param]
+            param_obj = comp.get_attr(param)
+            val = param_obj.val
+            val_SI = param_obj.val_SI
             if not colored:
                 return str(val)
             # else part
-            if (val < comp.get_attr(param).min_val - ERR or
-                    val > comp.get_attr(param).max_val + ERR ):
+            if (val_SI < comp.get_attr(param).min_val - ERR or
+                    val_SI > comp.get_attr(param).max_val + ERR ):
                 return f"{coloring['err']}{val}{coloring['end']}"
             if comp.get_attr(args[0]).is_var:
                 return f"{coloring['var']}{val}{coloring['end']}"
@@ -3591,7 +3313,11 @@ class Network:
         >>> from tespy.connections import Connection, Ref, PowerConnection
         >>> from tespy.networks import Network
         >>> import os
-        >>> nw = Network(p_unit='bar', T_unit='C', h_unit='kJ / kg', iterinfo=False)
+        >>> nw = Network(iterinfo=False)
+        >>> nw.units.set_defaults(**{
+        ...     "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg",
+        ...     "power": "MW"
+        ... })
         >>> air = Source('air')
         >>> f = Source('fuel')
         >>> compressor = Compressor('compressor')
@@ -3652,7 +3378,7 @@ class Network:
         >>> combustion.set_attr(lamb=None)
         >>> c3.set_attr(T=1100)
         >>> c1.set_attr(m=None)
-        >>> e4.set_attr(E=1e6)
+        >>> e4.set_attr(E=1)
         >>> nw.solve('design')
         >>> nw.assert_convergence()
         >>> nw.save('design_state.json')
@@ -3662,7 +3388,7 @@ class Network:
         >>> nw.solve('offdesign', design_path='design_state.json')
         >>> round(turbine.eta_s.val, 1)
         0.9
-        >>> e4.set_attr(E=0.75e6)
+        >>> e4.set_attr(E=0.75)
         >>> nw.solve('offdesign', design_path='design_state.json')
         >>> nw.assert_convergence()
         >>> eta_s_t = round(turbine.eta_s.val, 3)
@@ -3689,7 +3415,7 @@ class Network:
         >>> imported_nwk.solve('offdesign', design_path='design_state.json')
         >>> round(imported_nwk.get_comp('turbine').eta_s.val, 3)
         0.9
-        >>> imported_nwk.get_conn('e4').set_attr(E=0.75e6)
+        >>> imported_nwk.get_conn('e4').set_attr(E=0.75)
         >>> imported_nwk.solve('offdesign', design_path='design_state.json')
         >>> round(imported_nwk.get_comp('turbine').eta_s.val, 3) == eta_s_t
         True
@@ -3701,14 +3427,19 @@ class Network:
         msg = f'Reading network data from base path {json_file_path}.'
         logger.info(msg)
 
+        with open(json_file_path, "r") as f:
+            network_data = json.load(f)
+        # create network
+        # get method to ensure compatibility with old style export
+        units = Units.from_json(network_data["Network"].get("units", {}))
+        network_data["Network"]["units"] = units
+        nw = cls(**network_data["Network"])
+
         # load components
         comps = {}
 
         module_name = "tespy.components"
         _ = importlib.import_module(module_name)
-
-        with open(json_file_path, "r") as f:
-            network_data = json.load(f)
 
         for component, data in network_data["Component"].items():
             if component not in component_registry.items:
@@ -3722,13 +3453,10 @@ class Network:
                 raise hlp.TESPyNetworkError(msg)
 
             target_class = component_registry.items[component]
-            comps.update(_construct_components(target_class, data))
+            comps.update(_construct_components(target_class, data, nw))
 
         msg = 'Created network components.'
         logger.info(msg)
-
-        # create network
-        nw = cls(**network_data["Network"])
 
         conns = {}
         # load connections
@@ -4080,7 +3808,7 @@ def v07_to_v08_export(path):
     return data
 
 
-def _construct_components(target_class, data):
+def _construct_components(target_class, data, nw):
     r"""
     Create TESPy component from class name and set parameters.
 
@@ -4108,8 +3836,14 @@ def _construct_components(target_class, data):
                         param_data["char_func"] = CharLine(**param_data["char_func"])
                     elif isinstance(container, dc_cm):
                         param_data["char_func"] = CharMap(**param_data["char_func"])
-                if isinstance(container, dc_prop):
-                    param_data["val0"] = param_data["val"]
+
+                if "val" in param_data:
+                    if "unit" in param_data and param_data["unit"] is not None:
+                        param_data["val"] = nw.units.ureg.Quantity(
+                            param_data["val"], param_data["unit"]
+                        )
+                    if "val0" in param_data:
+                        param_data["val0"] = param_data["val"]
                 container.set_attr(**param_data)
             else:
                 instances[cp].set_attr(**{param: param_data})

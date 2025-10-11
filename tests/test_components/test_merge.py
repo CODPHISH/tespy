@@ -22,7 +22,10 @@ from tespy.networks import Network
 class TestMerge:
 
     def setup_method(self):
-        self.nwk = Network(T_unit="C", p_unit="bar", h_unit="kJ / kg")
+        self.nwk = Network()
+        self.nwk.units.set_defaults(**{
+            "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg"
+        })
 
         so1 = Source("Source1")
         so2 = Source("Source2")
@@ -44,6 +47,7 @@ class TestMerge:
 
         self.nwk.solve("design")
         self.nwk.assert_convergence()
+        assert self.nwk.status == 0
 
         target = c1.m.val_SI + c2.m.val_SI
         msg = f"Target value for mass flow at connection 3 must be {target}."
@@ -71,7 +75,10 @@ class TestCyclicMerging:
 
     def setup_method(self):
 
-        self.nwk = Network(T_unit="C", p_unit="bar", h_unit="kJ / kg")
+        self.nwk = Network()
+        self.nwk.units.set_defaults(**{
+            "pressure": "bar", "temperature": "degC", "enthalpy": "kJ/kg"
+        })
 
         source = Source("source1")
         merge = Merge("merge")
