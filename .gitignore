@@ -62,4 +62,8 @@ uv.lock
 *.json
 *.csv
 *.svg
+reheat_cycle_design
+detailed_boiler_design
+integrated_boiler_turbine_design
+integrated_boiler_turbine_design_performance.txt
 __pycache__/
