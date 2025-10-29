@@ -59,3 +59,7 @@ docs/_build
 .appveyor.token
 *.bak
 uv.lock
+*.json
+*.csv
+*.svg
+__pycache__/

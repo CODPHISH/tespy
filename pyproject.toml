@@ -16,9 +16,16 @@ include = [
     "paper.bib",
     "paper.md",
     "tox.ini",
+    "MANIFEST.in",
+    "README_BOILER_TURBINE.md",
+    "README_REHEAT_CYCLE.md",
+    "README_POWER_PLANT_MODELS.md",
+    "waste_heat_boiler_turbine_model.py",
+    "reheat_cycle_model.py",
     "docs/",
     "tests/",
     "tutorial/",
+    "myloggings/",
 ]
 exclude = [
     "docs/_build",
@@ -26,7 +33,7 @@ exclude = [
 
 [project]
 name = "tespy"
-version = "0.9.7"
+version = "0.9.8.post3"
 description = "Thermal Engineering Systems in Python (TESPy)"
 readme = "README.rst"
 authors = [
