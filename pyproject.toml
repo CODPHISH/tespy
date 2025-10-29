@@ -24,6 +24,7 @@ include = [
     "waste_heat_boiler_turbine_model.py",
     "reheat_cycle_model.py",
     "detailed_boiler_rankine_model.py",
+    "integrated_boiler_turbine_model.py",
     "docs/",
     "tests/",
     "tutorial/",
