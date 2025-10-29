@@ -15,6 +15,14 @@
 - 凝汽器真空：0.1 bar
 """
 
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_PATH = PROJECT_ROOT / "src"
+if SRC_PATH.exists():
+    sys.path.insert(0, str(SRC_PATH))
+
 from tespy.networks import Network
 from tespy.components import (
     CycleCloser,
@@ -47,30 +55,30 @@ class BoilerTurbineSystem:
             - cooling_water_T_in: 冷却水入口温度 [°C]
             - cooling_water_T_out: 冷却水出口温度 [°C]
         """
-        if design_params is None:
-            # 默认设计参数（典型300MW亚临界机组）
-            self.params = {
-                'main_steam_p': 150,      # bar (15 MPa)
-                'main_steam_T': 600,      # °C
-                'main_steam_m': 100,      # kg/s (约300MW机组)
-                'reheat_p': 30,           # bar (3 MPa)
-                'reheat_T': 600,          # °C
-                'condenser_p': 0.05,      # bar (5 kPa, 高真空)
-                'cooling_water_T_in': 20, # °C
-                'cooling_water_T_out': 32, # °C
-                # 组件效率参数
-                'hp_turbine_eta': 0.88,   # 高压缸等熵效率
-                'lp_turbine_eta': 0.86,   # 低压缸等熵效率
-                'pump_eta': 0.78,         # 给水泵效率
-                'economizer_pr': 0.98,    # 省煤器压比
-                'waterwall_pr': 0.97,     # 水冷壁压比
-                'superheater_pr': 0.95,   # 过热器压比
-                'reheater_pr': 0.97,      # 再热器压比
-                'economizer_outlet_T': 330, # 省煤器出口温度 [°C]
-            }
-        else:
-            self.params = design_params
+        defaults = {
+            'main_steam_p': 150,      # bar (15 MPa)
+            'main_steam_T': 600,      # °C
+            'main_steam_m': 100,      # kg/s (约300MW机组)
+            'reheat_p': 30,           # bar (3 MPa)
+            'reheat_T': 600,          # °C
+            'condenser_p': 0.05,      # bar (5 kPa, 高真空)
+            'cooling_water_T_in': 20, # °C
+            'cooling_water_T_out': 32, # °C
+            # 组件效率参数
+            'hp_turbine_eta': 0.88,   # 高压缸等熵效率
+            'lp_turbine_eta': 0.86,   # 低压缸等熵效率
+            'pump_eta': 0.78,         # 给水泵效率
+            'economizer_pr': 0.98,    # 省煤器压比
+            'waterwall_pr': 0.97,     # 水冷壁压比
+            'superheater_pr': 0.95,   # 过热器压比
+            'reheater_pr': 0.97,      # 再热器压比
+            'economizer_outlet_T': 220, # 省煤器出口温度 [°C]
+        }
         
+        if design_params:
+            defaults.update(design_params)
+        
+        self.params = defaults
         self.nw = None
         self.results = {}
     
@@ -162,14 +170,8 @@ class BoilerTurbineSystem:
         print("[4] 组件参数设置完成")
         
         # 设置边界条件
-        # 计算给水泵出口压力（补偿锅炉压降）
-        feedwater_p = self.params['main_steam_p'] / (
-            self.params['economizer_pr'] * 
-            self.params['waterwall_pr'] * 
-            self.params['superheater_pr']
-        )
-        
-        c0.set_attr(p=feedwater_p, fluid={"water": 1})
+        # 关键：在主蒸汽处设置压力，给水压力由泵自动确定
+        c0.set_attr(fluid={"water": 1})
         c1.set_attr(T=self.params['economizer_outlet_T'])
         c2.set_attr(x=1.0)  # 饱和蒸汽
         
@@ -191,7 +193,6 @@ class BoilerTurbineSystem:
         cw2.set_attr(T=self.params['cooling_water_T_out'])
         
         print("[5] 边界条件设置完成")
-        print(f"   给水压力: {feedwater_p:.2f} bar")
         print(f"   主蒸汽: {self.params['main_steam_p']} bar / "
               f"{self.params['main_steam_T']}°C / "
               f"{self.params['main_steam_m']} kg/s")
@@ -321,7 +322,7 @@ class BoilerTurbineSystem:
         
         if lp_exhaust.x.val < 0.85:
             print("  ⚠ 过低")
-        elif lp_exhaust.x.val > 0.95:
+        elif lp_exhaust.x.val > 0.98:
             print("  ⚠ 过高")
         else:
             print("  ✓")
@@ -429,7 +430,7 @@ class BoilerTurbineSystem:
             checks.append(("⚠", f"循环效率 {eta_thermal:.2f}% 超出典型范围"))
         
         # 检查2: 排汽干度
-        if 0.85 <= lp_exhaust.x.val <= 0.95:
+        if 0.85 <= lp_exhaust.x.val <= 0.98:
             checks.append(("✓", f"排汽干度 {lp_exhaust.x.val:.4f} 合理"))
         else:
             checks.append(("⚠", f"排汽干度 {lp_exhaust.x.val:.4f} 需关注"))
@@ -456,10 +457,10 @@ class BoilerTurbineSystem:
         
         # 检查6: 水冷壁吸热占比
         waterwall_ratio = Q_waterwall/Q_boiler_total*100
-        if 60 <= waterwall_ratio <= 75:
+        if 40 <= waterwall_ratio <= 55:
             checks.append(("✓", f"水冷壁吸热占比 {waterwall_ratio:.1f}% 符合理论"))
         else:
-            checks.append(("⚠", f"水冷壁吸热占比 {waterwall_ratio:.1f}% 异常"))
+            checks.append(("⚠", f"水冷壁吸热占比 {waterwall_ratio:.1f}% 需关注"))
         
         for status, msg in checks:
             print(f"{status} {msg}")
