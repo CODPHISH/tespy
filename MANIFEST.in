@@ -5,4 +5,8 @@ include waste_heat_boiler_turbine_model.py
 include reheat_cycle_model.py
 include detailed_boiler_rankine_model.py
 include integrated_boiler_turbine_model.py
+include predictive_boiler_turbine_model.py
+include predictive_boiler_turbine_stage1_simple.py
+include stage1_predictive_model.py
+include *.py
 recursive-include myloggings *.log
