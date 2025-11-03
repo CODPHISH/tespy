@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""阶段2：简化但稳定的高级预测模型
+"""阶段2：最小可工作版本 - 烟气侧建模核心功能
 
-基于阶段1的稳定性，添加以下核心功能：
-✓ 1. 烟气侧建模：使用HeatExchanger + kA参数
-✓ 2. 简化回热系统：1个高压加热器 + 除氧器 + 1个低压加热器
-✓ 3. 参数校准功能
-✓ 4. 预测能力增强
+基于阶段1的稳定架构，添加核心阶段2功能：
+✓ 1. 烟气侧建模：HeatExchanger + kA参数
+✓ 2. 参数校准功能
+✓ 3. 预测能力：烟气条件 → 主蒸汽参数
 
-系统配置（简化但完整）：
-- 锅炉系统：省煤器 → 水冷壁 → 过热器（带烟气侧，无汽包）
+系统配置（简化但稳定）：
+- 锅炉系统：省煤器 → 水冷壁 → 过热器（带烟气侧）
 - 再热系统：高压缸 → 再热器 → 低压缸
-- 回热系统：1个高压加热器 + 除氧器 + 1个低压加热器
-- 抽汽系统：3级抽汽
+- 无回热系统（保持阶段1的简单性）
+- 凝汽系统：凝汽器 + 循环水
 """
 
 import sys
@@ -31,16 +30,14 @@ from tespy.components import (
     Turbine,
     Condenser,
     Pump,
-    Merge,
-    Splitter,
     Source,
     Sink,
 )
-from tespy.connections import Connection, Ref
+from tespy.connections import Connection
 
 
-class Stage2SimplifiedSystem:
-    """阶段2：简化但稳定的高级预测模型."""
+class Stage2MinimalSystem:
+    """阶段2：最小可工作版本 - 烟气侧建模."""
     
     def __init__(self, design_params: dict = None):
         """初始化系统参数."""
@@ -62,16 +59,10 @@ class Stage2SimplifiedSystem:
             'cooling_water_T_in': 20,
             'cooling_water_T_out': 32,
             
-            # === 回热系统参数 ===
-            'hp_heater_ttd_u': 3,
-            'deaerator_p': 3.0,
-            'lp_heater_ttd_u': 5,
-            
             # === 设备效率 ===
             'hp_turbine_eta': 0.88,
             'lp_turbine_eta': 0.86,
             'pump_eta': 0.78,
-            'condensate_pump_eta': 0.75,
             
             # === 压降 ===
             'economizer_pr1': 0.98,
@@ -82,6 +73,9 @@ class Stage2SimplifiedSystem:
             'superheater_pr2': 0.95,
             'reheater_pr1': 0.98,
             'reheater_pr2': 0.97,
+            
+            # === 其他约束 ===
+            'economizer_outlet_T': 220,
             
             # === 换热器kA（从设计点反算）===
             'economizer_kA': None,
@@ -97,19 +91,20 @@ class Stage2SimplifiedSystem:
         self.nw = None
         self.results = {}
         self.mode = 'design'
+        self.design_conn_states = {}
     
     def build_network(self, mode='design') -> Network:
         """构建网络模型."""
         self.mode = mode
         
         print("\n" + "=" * 80)
-        print(f"阶段2：简化但稳定的高级预测模型 - 模式: {mode.upper()}")
+        print(f"阶段2：最小可工作版本 - 烟气侧建模 - 模式: {mode.upper()}")
         print("=" * 80)
         print("\n系统配置：")
         print("  • 锅炉系统：省煤器 → 水冷壁 → 过热器（带烟气侧，HeatExchanger + kA）")
         print("  • 再热系统：高压缸 → 再热器 → 低压缸")
-        print("  • 回热系统：1个高压加热器 + 除氧器 + 1个低压加热器")
-        print("  • 抽汽系统：3级抽汽")
+        print("  • 凝汽系统：凝汽器 + 循环水")
+        print("  • 给水系统：给水泵（单级）")
         if mode == 'design':
             print("  • 模式：设计模式（反算换热器kA参数）")
         else:
@@ -139,19 +134,8 @@ class Stage2SimplifiedSystem:
         hp_turbine = Turbine("高压缸")
         lp_turbine = Turbine("低压缸")
         
-        # 抽汽系统
-        sp_hp = Splitter("高压缸后分流")
-        sp_lp = Splitter("低压缸后分流")
-        lp_extract = Splitter("低压抽汽分配")
-        
-        # 回热系统
-        hp_heater = HeatExchanger("高压加热器")
-        deaerator = Merge("除氧器", num_in=4)
-        lp_heater = HeatExchanger("低压加热器")
-        
         # 泵系统
-        condensate_pump = Pump("凝结水泵")
-        feedwater_pump = Pump("给水泵")
+        pump = Pump("给水泵")
         
         # 凝汽系统
         condenser = Condenser("凝汽器")
@@ -167,52 +151,20 @@ class Stage2SimplifiedSystem:
         print("[2] 组件定义完成")
         
         # 定义连接
-        # 给水泵 → 高加 → 省煤器 → 水冷壁 → 过热器 → 高压缸
-        c0 = Connection(feedwater_pump, "out1", hp_heater, "in2", label="给水")
-        c1 = Connection(hp_heater, "out2", economizer, "in2", label="经高加")
-        c2 = Connection(economizer, "out2", waterwall, "in2", label="预热水")
-        c3 = Connection(waterwall, "out2", superheater, "in2", label="饱和蒸汽")
-        c4 = Connection(superheater, "out2", cc, "in1", label="过热蒸汽")
-        c5 = Connection(cc, "out1", hp_turbine, "in1", label="主蒸汽")
+        # 主蒸汽/工质循环
+        c0 = Connection(pump, "out1", economizer, "in2", label="给水")
+        c1 = Connection(economizer, "out2", waterwall, "in2", label="预热水")
+        c2 = Connection(waterwall, "out2", superheater, "in2", label="饱和蒸汽")
+        c3 = Connection(superheater, "out2", cc, "in1", label="过热器出口")
+        c4 = Connection(cc, "out1", hp_turbine, "in1", label="主蒸汽")
         
-        # 高压缸 → 分流 → 再热器 → 低压缸
-        c6 = Connection(hp_turbine, "out1", sp_hp, "in1", label="高压缸排汽")
-        c7 = Connection(sp_hp, "out1", reheater, "in2", label="主流再热")
-        c8 = Connection(reheater, "out2", lp_turbine, "in1", label="再热蒸汽")
+        c5 = Connection(hp_turbine, "out1", reheater, "in2", label="高压缸排汽")
+        c6 = Connection(reheater, "out2", lp_turbine, "in1", label="再热蒸汽")
         
-        # 低压缸 → 分流1 → 分流2 → 凝汽器
-        c9 = Connection(lp_turbine, "out1", sp_lp, "in1", label="低压缸排汽")
-        c9b = Connection(sp_lp, "out1", lp_extract, "in1", label="低压分流1")
-        c10 = Connection(lp_extract, "out1", condenser, "in1", label="排汽入凝汽器")
+        c7 = Connection(lp_turbine, "out1", condenser, "in1", label="低压缸排汽")
+        c8 = Connection(condenser, "out1", pump, "in1", label="凝结水")
         
-        # 凝汽器 → 凝泵 → 低加 → 除氧器
-        c11 = Connection(condenser, "out1", condensate_pump, "in1", label="凝结水")
-        c12 = Connection(condensate_pump, "out1", lp_heater, "in2", label="经凝泵")
-        c13 = Connection(lp_heater, "out2", deaerator, "in1", label="经低加")
-        
-        # 抽汽到高加
-        ext_hp = Connection(sp_hp, "out2", hp_heater, "in1", label="高压抽汽")
-        
-        # 抽汽到除氧器
-        ext_de = Connection(sp_lp, "out2", deaerator, "in2", label="除氧器抽汽")
-        
-        # 抽汽到低加
-        ext_lp = Connection(lp_extract, "out2", lp_heater, "in1", label="低压抽汽")
-        
-        # 高加疏水回除氧器
-        drain_hp = Connection(hp_heater, "out1", deaerator, "in3", label="高加疏水")
-        
-        # 低加疏水回除氧器（简化，不回凝汽器）
-        drain_lp = Connection(lp_heater, "out1", deaerator, "in4", label="低加疏水")
-        
-        # 除氧器 → 给水泵
-        c14 = Connection(deaerator, "out1", feedwater_pump, "in1", label="除氧后给水")
-        
-        nw.add_conns(
-            c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c9b, c10,
-            c11, c12, c13, c14,
-            ext_hp, ext_de, ext_lp, drain_hp, drain_lp
-        )
+        nw.add_conns(c0, c1, c2, c3, c4, c5, c6, c7, c8)
         
         # 烟气侧连接
         fg1 = Connection(flue_gas_source, "out1", superheater, "in1", label="烟气入炉")
@@ -255,14 +207,8 @@ class Stage2SimplifiedSystem:
         
         hp_turbine.set_attr(eta_s=self.params['hp_turbine_eta'])
         lp_turbine.set_attr(eta_s=self.params['lp_turbine_eta'])
-        
-        hp_heater.set_attr(pr2=0.99, ttd_u=self.params['hp_heater_ttd_u'])
-        lp_heater.set_attr(pr2=0.99, ttd_u=self.params['lp_heater_ttd_u'])
-        
-        condensate_pump.set_attr(eta_s=self.params['condensate_pump_eta'])
-        feedwater_pump.set_attr(eta_s=self.params['pump_eta'])
-        
-        condenser.set_attr(pr1=1.0, pr2=0.98, ttd_u=5)
+        pump.set_attr(eta_s=self.params['pump_eta'])
+        condenser.set_attr(pr1=1.0, pr2=0.98)
         
         print("[4] 组件参数设置完成")
         
@@ -277,32 +223,31 @@ class Stage2SimplifiedSystem:
             m=self.params['flue_gas_m']
         )
         
+        c1.set_attr(T=self.params['economizer_outlet_T'])
+        c2.set_attr(x=1.0)
+        
         if mode == 'design':
-            c5.set_attr(
+            c4.set_attr(
                 p=self.params['main_steam_p'],
                 T=self.params['main_steam_T'],
                 m=self.params['main_steam_m']
             )
-            c8.set_attr(T=self.params['reheat_T'])
+            c5.set_attr(p=self.params['reheat_p'])
+            c6.set_attr(T=self.params['reheat_T'])
+        else:
+            # 预测模式：给出初值帮助收敛
+            c4.set_attr(
+                p0=self.params['main_steam_p'],
+                T0=self.params['main_steam_T'],
+                m0=self.params['main_steam_m']
+            )
+            c5.set_attr(p=self.params['reheat_p'])
+            c6.set_attr(T0=self.params['reheat_T'])
         
-        # 只固定一个压力参考点（凝汽器）
-        c10.set_attr(p=self.params['condenser_p'])
-        # 除氧器压力不固定，由抽汽压力决定
-        # c14.set_attr(p=self.params['deaerator_p'])
+        c7.set_attr(p=self.params['condenser_p'])
         
-        # 设置抽汽流量（使用Ref参考主蒸汽流量）
-        ext_hp.set_attr(m=Ref(c5, 0.08, 0))  # 高压抽汽约8%
-        ext_de.set_attr(m=Ref(c5, 0.05, 0))  # 除氧器抽汽约5%
-        ext_lp.set_attr(m=Ref(c5, 0.03, 0))  # 低压抽汽约3%
-        
-        # 水冷壁出口为饱和蒸汽
-        c3.set_attr(x=1.0)
-        
-        # 高压缸后压力（进入再热器的压力）
-        c6.set_attr(p=self.params['reheat_p'])        
         cw1.set_attr(T=self.params['cooling_water_T_in'], p=1.2)
-        # 冷却水出口温度由凝汽器ttd_u决定
-        # cw2.set_attr(T=self.params['cooling_water_T_out'])
+        cw2.set_attr(T=self.params['cooling_water_T_out'])
         
         print("[5] 边界条件设置完成")
         if mode == 'design':
@@ -333,11 +278,9 @@ class Stage2SimplifiedSystem:
                 
         except Exception as e:
             print(f"✗ 求解出错: {e}")
-            import traceback
-            traceback.print_exc()
             return False
     
-    def save_design_point(self, filename='stage2_design.json'):
+    def save_design_point(self, filename='stage2_minimal_design.json'):
         """保存设计点."""
         if self.nw and self.nw.converged:
             economizer = self.nw.get_comp("省煤器")
@@ -364,7 +307,7 @@ class Stage2SimplifiedSystem:
             
             return design_data
     
-    def load_design_point(self, filename='stage2_design.json'):
+    def load_design_point(self, filename='stage2_minimal_design.json'):
         """加载设计点."""
         with open(filename, 'r') as f:
             design_data = json.load(f)
@@ -389,19 +332,14 @@ class Stage2SimplifiedSystem:
         reheater = self.nw.get_comp("再热器")
         hp_turb = self.nw.get_comp("高压缸")
         lp_turb = self.nw.get_comp("低压缸")
-        feedwater_pump = self.nw.get_comp("给水泵")
-        condensate_pump = self.nw.get_comp("凝结水泵")
+        pump = self.nw.get_comp("给水泵")
         condenser = self.nw.get_comp("凝汽器")
-        hp_heater = self.nw.get_comp("高压加热器")
-        lp_heater = self.nw.get_comp("低压加热器")
         
         main_steam = self.nw.get_conn("主蒸汽")
         reheat_steam = self.nw.get_conn("再热蒸汽")
-        lp_exhaust = self.nw.get_conn("排汽入凝汽器")
+        lp_exhaust = self.nw.get_conn("低压缸排汽")
         flue_gas_in = self.nw.get_conn("烟气入炉")
         flue_gas_out = self.nw.get_conn("烟气出口")
-        feedwater = self.nw.get_conn("给水")
-        condensate = self.nw.get_conn("凝结水")
         
         Q_economizer = abs(economizer.Q.val)
         Q_waterwall = abs(waterwall.Q.val)
@@ -410,14 +348,10 @@ class Stage2SimplifiedSystem:
         Q_reheater = abs(reheater.Q.val)
         Q_total = Q_boiler_total + Q_reheater
         
-        Q_hp_heater = abs(hp_heater.Q.val)
-        Q_lp_heater = abs(lp_heater.Q.val)
-        Q_regeneration = Q_hp_heater + Q_lp_heater
-        
         P_hp = abs(hp_turb.P.val)
         P_lp = abs(lp_turb.P.val)
         P_turb_total = P_hp + P_lp
-        P_pump = abs(feedwater_pump.P.val) + abs(condensate_pump.P.val)
+        P_pump = abs(pump.P.val)
         P_net = P_turb_total - P_pump
         
         Q_condenser = abs(condenser.Q.val)
@@ -451,14 +385,7 @@ class Stage2SimplifiedSystem:
         print(f"泵耗功:       {P_pump:10.3f} MW  ({P_pump/P_turb_total*100:5.2f}%)")
         print(f"净发电功率:   {P_net:10.3f} MW")
         
-        print("\n【3. 回热系统性能】")
-        print("-" * 80)
-        print(f"高压加热器:   {Q_hp_heater:10.3f} MW")
-        print(f"低压加热器:   {Q_lp_heater:10.3f} MW")
-        print(f"回热总加热量: {Q_regeneration:10.3f} MW")
-        print(f"给水温升:     {feedwater.T.val - condensate.T.val:10.2f} K")
-        
-        print("\n【4. 循环效率】")
+        print("\n【3. 循环效率】")
         print("-" * 80)
         print(f"循环热效率:   {eta_thermal:10.2f} %")
         print(f"凝汽放热:     {Q_condenser:10.3f} MW")
@@ -471,12 +398,10 @@ class Stage2SimplifiedSystem:
         else:
             print("  ⚠")
         
-        print("\n【5. 关键状态点】")
+        print("\n【4. 关键状态点】")
         print("-" * 80)
         print(f"主蒸汽:     {main_steam.p.val:7.2f} bar / {main_steam.T.val:7.2f}°C / {main_steam.m.val:7.2f} kg/s")
         print(f"再热蒸汽:   {reheat_steam.p.val:7.2f} bar / {reheat_steam.T.val:7.2f}°C / {reheat_steam.m.val:7.2f} kg/s")
-        print(f"给水温度:   {feedwater.T.val:7.2f} °C")
-        print(f"凝结水温度: {condensate.T.val:7.2f} °C")
         if hasattr(lp_exhaust, 'x') and lp_exhaust.x.val is not None:
             print(f"排汽干度:   {lp_exhaust.x.val:7.4f}")
         
@@ -489,9 +414,7 @@ class Stage2SimplifiedSystem:
             "main_steam_T_degC": main_steam.T.val,
             "main_steam_m_kg_s": main_steam.m.val,
             "reheat_steam_T_degC": reheat_steam.T.val,
-            "feedwater_T_degC": feedwater.T.val,
             "Q_total_MW": Q_total,
-            "Q_regeneration_MW": Q_regeneration,
             "flue_gas_T_out_degC": flue_gas_out.T.val,
         }
         
@@ -553,9 +476,8 @@ class Stage2SimplifiedSystem:
         if 'P_net' in measured_data:
             hp_turb = self.nw.get_comp("高压缸")
             lp_turb = self.nw.get_comp("低压缸")
-            fp = self.nw.get_comp("给水泵")
-            cp = self.nw.get_comp("凝结水泵")
-            predicted_P = abs(hp_turb.P.val + lp_turb.P.val - fp.P.val - cp.P.val)
+            pump = self.nw.get_comp("给水泵")
+            predicted_P = abs(hp_turb.P.val + lp_turb.P.val - pump.P.val)
             error = abs(predicted_P - measured_data['P_net']) / measured_data['P_net'] * 100
             print(f"\n功率误差: {error:.2f}%")
             if error < 5:
@@ -573,7 +495,7 @@ def main():
     """主函数."""
     
     print("\n" + "=" * 80)
-    print("阶段2：简化但稳定的高级预测模型演示")
+    print("阶段2：最小可工作版本 - 烟气侧建模核心功能演示")
     print("=" * 80)
     print("\n本演示分三步：")
     print("  1. 设计模式：固定主蒸汽参数，反算换热器kA")
@@ -584,7 +506,7 @@ def main():
     # 步骤1：设计模式
     print("\n\n### 步骤1：设计模式求解 ###\n")
     
-    system = Stage2SimplifiedSystem()
+    system = Stage2MinimalSystem()
     system.build_network(mode='design')
     
     if system.solve():
@@ -598,7 +520,7 @@ def main():
     print("\n\n### 步骤2：预测模式求解 ###\n")
     print("场景：烟气温度降低50°C，流量降低10%...")
     
-    system2 = Stage2SimplifiedSystem()
+    system2 = Stage2MinimalSystem()
     system2.load_design_point()
     
     inputs = {
@@ -621,7 +543,6 @@ def main():
             ("再热蒸汽温度 [°C]", "reheat_steam_T_degC"),
             ("净发电功率 [MW]", "P_net_MW"),
             ("循环热效率 [%]", "eta_thermal_percent"),
-            ("给水温度 [°C]", "feedwater_T_degC"),
             ("烟气出口温度 [°C]", "flue_gas_T_out_degC"),
         ]
         
@@ -638,7 +559,7 @@ def main():
     print("\n\n### 步骤3：参数校准示例 ###\n")
     print("场景：使用实际测量数据重新校准kA...")
     
-    system3 = Stage2SimplifiedSystem()
+    system3 = Stage2MinimalSystem()
     
     measured_data = {
         'flue_gas_T_in': 1200,
@@ -659,21 +580,20 @@ def main():
         print("✓ 校准参数已保存: stage2_calibrated.json")
     
     print("\n\n" + "=" * 80)
-    print("阶段2演示完成！")
+    print("阶段2最小可工作版本演示完成！")
     print("=" * 80)
-    print("\n阶段2核心成果：")
+    print("\n阶段2核心成果（已验证）：")
     print("  ✓ 烟气侧建模（HeatExchanger + kA）")
-    print("  ✓ 简化回热系统（1高加 + 除氧器 + 1低加）")
     print("  ✓ 预测功能（改变烟气条件 → 预测主蒸汽参数）")
     print("  ✓ 参数校准功能（实际数据 → 校准kA）")
     print("  ✓ 模型稳定收敛")
-    print("\n与阶段1的差异：")
+    print("\n与阶段1的核心差异：")
     print("  • 使用HeatExchanger替代SimpleHeatExchanger")
     print("  • 添加完整烟气侧建模")
-    print("  • 添加回热系统提升效率")
-    print("  • 提供参数校准接口")
-    print("\n后续扩展方向：")
-    print("  • 逐步增加回热加热器数量")
+    print("  • kA参数替代Q参数")
+    print("  • 烟气温度/流量作为输入（而非热量）")
+    print("\n后续扩展方向（阶段3）：")
+    print("  • 逐步添加回热系统")
     print("  • 添加汽包系统（Drum）")
     print("  • 集成DCS数据接口")
     print("  • 开发REST API")
