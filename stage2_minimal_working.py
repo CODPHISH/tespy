@@ -91,7 +91,69 @@ class Stage2MinimalSystem:
         self.nw = None
         self.results = {}
         self.mode = 'design'
-        self.design_conn_states = {}
+        self.design_conn_states: dict[str, dict[str, float]] = {}
+        self.design_reference: dict[str, float] = {}
+    
+    def _capture_design_state(self) -> None:
+        """记录设计工况下关键连接的状态参数."""
+        if not self.nw or not self.nw.converged:
+            return
+        conn_labels = [
+            "给水",
+            "预热水",
+            "饱和蒸汽",
+            "过热器出口",
+            "主蒸汽",
+            "高压缸排汽",
+            "再热蒸汽",
+            "低压缸排汽",
+            "凝结水",
+            "烟气入炉",
+            "烟气出口",
+        ]
+        for label in conn_labels:
+            try:
+                conn = self.nw.get_conn(label)
+            except KeyError:
+                continue
+            state: dict[str, float] = {}
+            if conn.p.val is not None:
+                state["p"] = conn.p.val
+            if conn.T.val is not None:
+                state["T"] = conn.T.val
+            if conn.h.val is not None:
+                state["h"] = conn.h.val
+            if conn.m.val is not None:
+                state["m"] = conn.m.val
+            if state:
+                self.design_conn_states[label] = state
+        
+        # 记录设计参数作为参考
+        self.design_reference = {
+            'flue_gas_T_in': self.params['flue_gas_T_in'],
+            'flue_gas_m': self.params['flue_gas_m'],
+        }
+    
+    def _apply_initial_conditions(self) -> None:
+        """在预测模式下应用设计工况的初值以增强收敛性."""
+        if not self.nw or not self.design_conn_states:
+            return
+        for label, state in self.design_conn_states.items():
+            try:
+                conn = self.nw.get_conn(label)
+            except KeyError:
+                continue
+            attrs = {}
+            if "p" in state:
+                attrs["p0"] = state["p"]
+            if "T" in state:
+                attrs["T0"] = state["T"]
+            if "h" in state:
+                attrs["h0"] = state["h"]
+            if "m" in state:
+                attrs["m0"] = state["m"]
+            if attrs:
+                conn.set_attr(**attrs)
     
     def build_network(self, mode='design') -> Network:
         """构建网络模型."""
@@ -249,12 +311,18 @@ class Stage2MinimalSystem:
         cw1.set_attr(T=self.params['cooling_water_T_in'], p=1.2)
         cw2.set_attr(T=self.params['cooling_water_T_out'])
         
+        # 在预测模式下应用设计工况的初值
+        if mode == 'offdesign' and self.design_conn_states:
+            self._apply_initial_conditions()
+        
         print("[5] 边界条件设置完成")
         if mode == 'design':
             print(f"   主蒸汽(固定): {self.params['main_steam_p']} bar / "
                   f"{self.params['main_steam_T']}°C / {self.params['main_steam_m']} kg/s")
         else:
             print(f"   主蒸汽(预测): 由烟气和换热器kA决定")
+            if self.design_conn_states:
+                print(f"   使用设计工况初值增强收敛性")
         print(f"   烟气: {self.params['flue_gas_T_in']}°C / {self.params['flue_gas_m']} kg/s")
         print("=" * 80)
         
@@ -270,6 +338,8 @@ class Stage2MinimalSystem:
             self.nw.solve(mode="design")
             
             if self.nw.converged:
+                if self.mode == 'design':
+                    self._capture_design_state()
                 print("✓ 求解成功")
                 return True
             else:
@@ -298,7 +368,21 @@ class Stage2MinimalSystem:
             with open(filename, 'w') as f:
                 json.dump(design_data, f, indent=2)
             
-            print(f"\n✓ 设计点已保存: {filename}")
+            # 同步保存设计工况状态
+            if self.design_conn_states:
+                state_file = filename.replace('.json', '_states.json')
+                state_payload = {
+                    'design_reference': self.design_reference,
+                    'conn_states': self.design_conn_states,
+                }
+                with open(state_file, 'w') as f:
+                    json.dump(state_payload, f, indent=2)
+                print(f"\n✓ 设计点已保存: {filename}")
+                print(f"✓ 设计工况状态已保存: {state_file}")
+            else:
+                print(f"\n✓ 设计点已保存: {filename}")
+                print("⚠️  设计工况状态未捕获，预测模式可能需要手动运行设计模式")
+            
             print("\n关键设计参数（kA值）：")
             print(f"  economizer_kA:  {economizer.kA.val:12.1f} kW/K")
             print(f"  waterwall_kA:   {waterwall.kA.val:12.1f} kW/K")
@@ -313,7 +397,30 @@ class Stage2MinimalSystem:
             design_data = json.load(f)
         
         self.params.update(design_data)
-        print(f"\n✓ 设计点已加载: {filename}")
+        
+        # 也尝试加载设计工况状态用于预测模式
+        state_file = filename.replace('.json', '_states.json')
+        try:
+            with open(state_file, 'r') as f:
+                state_data = json.load(f)
+                if isinstance(state_data, dict):
+                    # 检查是否有design_reference键
+                    if 'design_reference' in state_data:
+                        self.design_reference = state_data['design_reference']
+                        self.design_conn_states = state_data.get('conn_states', {})
+                    else:
+                        # 旧格式，只有conn_states
+                        self.design_conn_states = state_data
+                        self.design_reference = {
+                            'flue_gas_T_in': self.params['flue_gas_T_in'],
+                            'flue_gas_m': self.params['flue_gas_m'],
+                        }
+            print(f"\n✓ 设计点已加载: {filename}")
+            print(f"✓ 设计工况状态已加载: {state_file}")
+        except FileNotFoundError:
+            print(f"\n✓ 设计点已加载: {filename}")
+            print(f"⚠️  设计工况状态文件未找到: {state_file}")
+        
         return design_data
     
     def analyze(self) -> dict:
@@ -422,14 +529,54 @@ class Stage2MinimalSystem:
     
     def predict(self, inputs: dict) -> dict:
         """预测接口."""
+        if not self.design_conn_states:
+            return {"error": "请先运行设计模式或加载设计点。"}
+        
+        # 目标工况
+        target_T = inputs.get('flue_gas_T_in', self.params.get('flue_gas_T_in', 0))
+        target_m = inputs.get('flue_gas_m', self.params.get('flue_gas_m', 0))
+        design_T = self.design_reference.get('flue_gas_T_in', target_T)
+        design_m = self.design_reference.get('flue_gas_m', target_m)
+        
+        # 如果未提供，则使用当前参数
+        if target_T is None:
+            target_T = self.params['flue_gas_T_in']
+        if target_m is None:
+            target_m = self.params['flue_gas_m']
+        
+        steps_candidates = [4, 6, 8, 10, 12]
+        original_params = self.params.copy()
         self.params.update(inputs)
-        self.build_network(mode='offdesign')
+        self.params['flue_gas_T_in'] = design_T
+        self.params['flue_gas_m'] = design_m
+        best_results = None
+        for steps in steps_candidates:
+            # 每次尝试前重建网络并应用初值
+            self.params['flue_gas_T_in'] = design_T
+            self.params['flue_gas_m'] = design_m
+            self.build_network(mode='offdesign')
+            attempt_success = True
+            for step in range(1, steps + 1):
+                frac = step / steps
+                intermediate_T = design_T + (target_T - design_T) * frac
+                intermediate_m = design_m + (target_m - design_m) * frac
+                fg_in = self.nw.get_conn('烟气入炉')
+                fg_in.set_attr(T=intermediate_T, m=intermediate_m)
+                result = self.solve()
+                if not result:
+                    attempt_success = False
+                    break
+            if attempt_success:
+                best_results = self.analyze()
+                break
+        if best_results is None:
+            self.params = original_params
+            return {"error": "求解失败（所有步长尝试均未收敛）"}
         
-        if not self.solve():
-            return {"error": "求解失败"}
-        
-        results = self.analyze()
-        return results
+        self.params.update(inputs)
+        self.params['flue_gas_T_in'] = target_T
+        self.params['flue_gas_m'] = target_m
+        return best_results
     
     def calibrate(self, measured_data: dict) -> dict:
         """参数校准功能."""
