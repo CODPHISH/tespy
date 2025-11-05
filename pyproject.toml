@@ -42,6 +42,7 @@ include = [
     "tests/",
     "tutorial/",
     "myloggings/",
+    "boiler-turbine_design_state/",
 ]
 exclude = [
     "docs/_build",

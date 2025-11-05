@@ -61,6 +61,48 @@ python stage2_minimal_working.py
 
 ---
 
+## 🎓 博士模型整合（新增）
+
+**重要更新**：我们已成功整合博士提供的真实设计模式数据！
+
+博士提供的数据位于 `boiler-turbine_design_state/` 目录，包含了一个完整的、真实的锅炉-汽轮机系统（高压2段+低压7段汽轮机，多级换热器）的设计工况计算结果。
+
+### 新增工具
+
+| 文件 | 功能 |
+|------|------|
+| `analyze_phd_design_data.py` | 📊 分析博士数据，提取关键参数 |
+| `stage2_improved_phd_params.py` | 🔧 使用博士参数的改进模型 |
+| `README_PHD_MODEL_INTEGRATION.md` | 📚 详细整合说明文档 |
+| `phd_model_parameters.json` | 📄 从博士模型提取的参数 |
+
+### 快速使用
+
+```bash
+# 1. 分析博士提供的数据
+python analyze_phd_design_data.py
+
+# 2. 使用博士参数运行简化模型
+python stage2_improved_phd_params.py
+
+# 3. 查看详细说明
+cat README_PHD_MODEL_INTEGRATION.md
+```
+
+### 主要发现
+
+博士模型使用了更真实的参数：
+- 主蒸汽：161 bar / 560°C / 79.9 kg/s（vs 我们的 150 bar / 600°C / 100 kg/s）
+- 烟气：1485°C / 135.2 kg/s（vs 我们的 1200°C / 300 kg/s）
+- 汽轮机效率：0.7473（vs 我们的 0.86）
+- 净功率：~95 MW（vs 我们的 162 MW）
+
+这些差异是**正常的**，因为博士使用了更保守但更接近实际电厂的参数。
+
+详细对比请查看 `README_PHD_MODEL_INTEGRATION.md`。
+
+---
+
 ## 使用示例 💡
 
 ### 示例1：设计模式计算

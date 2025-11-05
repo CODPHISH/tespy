@@ -10,3 +10,16 @@ include predictive_boiler_turbine_stage1_simple.py
 include stage1_predictive_model.py
 include *.py
 recursive-include myloggings *.log
+include boiler-turbine_design_state/busses.json
+include boiler-turbine_design_state/connections.csv
+include boiler-turbine_design_state/components/DiabaticCombustionChamber.csv
+include boiler-turbine_design_state/components/Drum.csv
+include boiler-turbine_design_state/components/HeatExchanger.csv
+include boiler-turbine_design_state/components/Merge.csv
+include boiler-turbine_design_state/components/Pipe.csv
+include boiler-turbine_design_state/components/Pump.csv
+include boiler-turbine_design_state/components/Sink.csv
+include boiler-turbine_design_state/components/Source.csv
+include boiler-turbine_design_state/components/Splitter.csv
+include boiler-turbine_design_state/components/Turbine.csv
+include boiler-turbine_design_state/components/Valve.csv
