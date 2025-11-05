@@ -37,6 +37,7 @@ include = [
     "stage2_advanced_model.py",
     "stage2_simplified_model.py",
     "stage2_minimal_working.py",
+    "stage2_detailed_model.py",
     "test_stage2_predict.py",
     "docs/",
     "tests/",
