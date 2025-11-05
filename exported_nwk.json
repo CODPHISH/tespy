@@ -1,0 +1,383 @@
+{
+  "Network": {
+    "m_range": [
+      -1000000000000.0,
+      1000000000000.0
+    ],
+    "p_range": [
+      200.0,
+      30000000.0
+    ],
+    "h_range": [
+      1000.0,
+      7000000.0
+    ],
+    "units": {
+      "temperature": "kelvin",
+      "temperature_difference": "delta_degC",
+      "enthalpy": "J/kg",
+      "specific_energy": "J/kg",
+      "entropy": "J/kg/K",
+      "pressure": "Pa",
+      "mass_flow": "kg/s",
+      "volumetric_flow": "m3/s",
+      "specific_volume": "m3/kg",
+      "power": "W",
+      "heat": "W",
+      "quality": "1",
+      "vapor_mass_fraction": "1",
+      "efficiency": "1",
+      "ratio": "1",
+      "length": "m",
+      "speed": "m/s",
+      "area": "m2",
+      "thermal_conductivity": "W/m/K",
+      "heat_transfer_coefficient": "W/K"
+    }
+  },
+  "Connection": {
+    "Connection": {
+      "1": {
+        "source": "source",
+        "target": "I am a component",
+        "source_id": "out1",
+        "target_id": "in1",
+        "design_path": null,
+        "design": [],
+        "offdesign": [],
+        "local_design": false,
+        "printout": true,
+        "mixing_rule": null,
+        "m": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kg/s"
+        },
+        "p": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "Pa"
+        },
+        "h": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "J/kg"
+        },
+        "T_bubble": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "T_dew": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "vol": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m3/kg"
+        },
+        "s": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "J/kg/K"
+        },
+        "fluid": {
+          "val": {},
+          "is_set": [],
+          "engine": {},
+          "back_end": {}
+        },
+        "fluid_balance": {
+          "val": false,
+          "is_set": false
+        },
+        "T": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "v": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m3/s"
+        },
+        "x": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "1"
+        },
+        "Td_bp": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "delta_degC"
+        },
+        "td_dew": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "delta_degC"
+        },
+        "td_bubble": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "delta_degC"
+        },
+        "m_ref": {},
+        "p_ref": {},
+        "h_ref": {},
+        "T_ref": {},
+        "v_ref": {},
+        "state": {
+          "val": NaN,
+          "is_set": false
+        }
+      },
+      "2": {
+        "source": "I am a component",
+        "target": "sink",
+        "source_id": "out1",
+        "target_id": "in1",
+        "design_path": null,
+        "design": [],
+        "offdesign": [],
+        "local_design": false,
+        "printout": true,
+        "mixing_rule": null,
+        "m": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kg/s"
+        },
+        "p": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "Pa"
+        },
+        "h": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "J/kg"
+        },
+        "T_bubble": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "T_dew": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "vol": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m3/kg"
+        },
+        "s": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "J/kg/K"
+        },
+        "fluid": {
+          "val": {},
+          "is_set": [],
+          "engine": {},
+          "back_end": {}
+        },
+        "fluid_balance": {
+          "val": false,
+          "is_set": false
+        },
+        "T": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "v": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m3/s"
+        },
+        "x": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "1"
+        },
+        "Td_bp": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "delta_degC"
+        },
+        "td_dew": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "delta_degC"
+        },
+        "td_bubble": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "delta_degC"
+        },
+        "m_ref": {},
+        "p_ref": {},
+        "h_ref": {},
+        "T_ref": {},
+        "v_ref": {},
+        "state": {
+          "val": NaN,
+          "is_set": false
+        }
+      }
+    }
+  },
+  "Component": {
+    "MyComponent": {
+      "I am a component": {
+        "design": [],
+        "offdesign": [],
+        "local_design": false,
+        "local_offdesign": false,
+        "design_path": null,
+        "printout": true,
+        "fkt_group": "I am a component",
+        "char_warnings": true,
+        "bypass": false,
+        "power_connector_location": {
+          "val": NaN,
+          "is_set": false
+        },
+        "Q": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "W"
+        },
+        "pr": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "1"
+        },
+        "dp": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "Pa"
+        },
+        "zeta": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "1"
+        },
+        "D": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m"
+        },
+        "L": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m"
+        },
+        "ks": {
+          "val": 0.0001,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "m"
+        },
+        "ks_HW": {
+          "val": 10.0,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "1"
+        },
+        "kA": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "W/K"
+        },
+        "kA_char": {
+          "is_set": false,
+          "param": "m",
+          "char_params": {
+            "type": "rel",
+            "inconn": 0,
+            "outconn": 0
+          }
+        },
+        "Tamb": {
+          "val": NaN,
+          "val_SI": NaN,
+          "is_set": false,
+          "unit": "kelvin"
+        },
+        "dissipative": {
+          "val": null,
+          "is_set": false
+        },
+        "darcy_group": {},
+        "hw_group": {},
+        "kA_group": {},
+        "kA_char_group": {}
+      }
+    },
+    "Sink": {
+      "sink": {
+        "design": [],
+        "offdesign": [],
+        "local_design": false,
+        "local_offdesign": false,
+        "design_path": null,
+        "printout": true,
+        "fkt_group": "sink",
+        "char_warnings": true,
+        "bypass": false
+      }
+    },
+    "Source": {
+      "source": {
+        "design": [],
+        "offdesign": [],
+        "local_design": false,
+        "local_offdesign": false,
+        "design_path": null,
+        "printout": true,
+        "fkt_group": "source",
+        "char_warnings": true,
+        "bypass": false
+      }
+    }
+  },
+  "Bus": {}
+}

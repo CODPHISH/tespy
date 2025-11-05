@@ -37,11 +37,13 @@ include = [
     "stage2_advanced_model.py",
     "stage2_simplified_model.py",
     "stage2_minimal_working.py",
+    "stage2_detailed_model.py",
     "test_stage2_predict.py",
     "docs/",
     "tests/",
     "tutorial/",
     "myloggings/",
+    "boiler-turbine_design_state/",
 ]
 exclude = [
     "docs/_build",
