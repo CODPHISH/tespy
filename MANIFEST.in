@@ -1,6 +1,7 @@
 include MANIFEST.in
 include *.md
 include *.MD
+include *.json
 include waste_heat_boiler_turbine_model.py
 include reheat_cycle_model.py
 include detailed_boiler_rankine_model.py
@@ -10,6 +11,7 @@ include predictive_boiler_turbine_stage1_simple.py
 include stage1_predictive_model.py
 include *.py
 recursive-include myloggings *.log
+recursive-include csv_state_export_folder *.csv
 include boiler-turbine_design_state/busses.json
 include boiler-turbine_design_state/connections.csv
 include boiler-turbine_design_state/components/DiabaticCombustionChamber.csv
