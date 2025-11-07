@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""阶段2详细建模：基于真实工况的锅炉-汽轮机联合循环系统.
+"""阶段2详细建模：简化的锅炉-汽轮机联合循环系统.
 
-本模型完全按照实际电厂的组件结构和参数搭建，确保与参考数据一致。
+本模型聚焦于主蒸汽 → 再热 → 汽轮机 → 凝汽 → 给水泵的核心热力循环，
+用于验证设计点热性能与关键状态参数。
 
-模型结构（与参考数据完全对应）：
-- 换热器：下省煤器 → 上省煤器 → 蒸发器上升管 → 低温过热器 → 屏式过热器 → 三级过热器 → 末级过热器
+⚠️ 注意：
+- 本代码为教学与研究用的“简化”模型，不包含燃烧室、汽包循环、抽汽回热等复杂设备。
+- 项目中的 `boiler-turbine_design_state/connections.csv` 描述的是完整电厂模型
+  （包含多燃料混烧、汽包水循环、抽汽回热、SCR脱硫脱硝及多级阀门等）。
+- 若需要该完整模型，请参考 CSV 与组件参数文件自行搭建。
+
+模型结构：
+- 换热器：下级省煤器 → 上级省煤器 → 蒸发器上升管 → 低温过热器 → 屏式过热器 → 三级过热器 → 末级过热器
 - 再热器：低温再热器 → 末级再热器
 - 汽轮机：高压缸（2段）→ 低压缸（7段）
 - 泵：给水泵
-- 凝汽器：简化为定压出口
+- 凝汽器：用 CycleCloser + 定压连接近似
 
 运行：
     python stage2_detailed_model.py
@@ -316,13 +323,15 @@ class DetailedBoilerTurbineModel:
         )
         
         # 关键状态约束
+        c_eco_upper_out.set_attr(T=self.params["eco_upper_out_T"])
         c_evap_out.set_attr(x=self.params["evap_out_x"])
         c_rh_high_out.set_attr(T=self.params["reheat_T"], p=self.params["reheat_p"])
         c_condensate.set_attr(p=self.params["condenser_p"], x=0)
-        c_pump_out.set_attr(p=self.params["pump_pr"])
-        c_rh_low_out.set_attr(T=self.params["rh_low_out_T"], p=self.params["reheat_p"])
-        c_sh_screen_out.set_attr(T=self.params["sh_screen_out_T"])
+        c_pump_out.set_attr(p=self.params["pump_pr"], T=self.params["pump_outlet_T"])
+        # 只设置低再出口压力，不设置温度（由kA和能量平衡决定）
+        c_rh_low_out.set_attr(p=self.params["reheat_p"])
         c_sh_tertiary_out.set_attr(T=self.params["sh_tertiary_out_T"])
+
         
         print("[4] 边界条件设置完成")
         print(f"   主蒸汽: {self.params['steam_p']} bar / {self.params['steam_T']}°C / {self.params['steam_m']} kg/s")

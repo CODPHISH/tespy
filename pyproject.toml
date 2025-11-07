@@ -44,6 +44,18 @@ include = [
     "tutorial/",
     "myloggings/",
     "boiler-turbine_design_state/",
+    "csv_state_export_folder/",
+    "NH3.json",
+    "R410A.json",
+    "design.json",
+    "design_case.json",
+    "exported_nwk.json",
+    "rankine_design.json",
+    "system_design.json",
+    "tmp.json",
+    "VALIDATION_REPORT.md",
+    "analyze_connections.py",
+    "map_system_topology.py",
 ]
 exclude = [
     "docs/_build",

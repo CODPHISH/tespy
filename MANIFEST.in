@@ -23,3 +23,13 @@ include boiler-turbine_design_state/components/Source.csv
 include boiler-turbine_design_state/components/Splitter.csv
 include boiler-turbine_design_state/components/Turbine.csv
 include boiler-turbine_design_state/components/Valve.csv
+include *.json
+include NH3.json
+include R410A.json
+include design.json
+include design_case.json
+include exported_nwk.json
+include rankine_design.json
+include system_design.json
+include tmp.json
+recursive-include csv_state_export_folder *.csv
