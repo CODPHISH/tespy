@@ -46,6 +46,9 @@ include = [
     "boiler-turbine_design_state/",
     "*.json",
     "csv_state_export_folder/",
+    "VERIFICATION_SUMMARY.md",
+    "STAGE2_VERIFICATION_REPORT.md",
+    "model_run.log",
 ]
 exclude = [
     "docs/_build",
