@@ -1,0 +1,42 @@
+FutureWarning: The unit 'C' is used for 'Coulomb' in pint. For backwards compatibility it will be parsed as degC for now. Please use '°C' (or correct pint aliases) instead  as it will stop working with the next major release
+Traceback (most recent call last):
+  File "/home/engine/project/stage2_detailed_model.py", line 527, in solve
+    self.nw.solve(mode="design", init_path="boiler-turbine_design_state")
+  File "/home/engine/project/src/tespy/networks/network.py", line 2478, in solve
+    self._prepare_problem()
+  File "/home/engine/project/src/tespy/networks/network.py", line 897, in _prepare_problem
+    self._create_structure_matrix()
+  File "/home/engine/project/src/tespy/networks/network.py", line 1154, in _create_structure_matrix
+    _linear_dependencies = self._find_linear_dependent_variables(
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/engine/project/src/tespy/networks/network.py", line 1317, in _find_linear_dependent_variables
+    self._raise_error_if_cycle(cycle, edges_with_factors, eq_idx)
+  File "/home/engine/project/src/tespy/networks/network.py", line 1478, in _raise_error_if_cycle
+    raise hlp.TESPyNetworkError(msg)
+tespy.tools.helpers.TESPyNetworkError: A circular dependency between the variables ('1#发电锅炉_主蒸汽', 'p'), ('1#发电锅炉_再热蒸汽低再出口', 'p'), ('1#发电锅炉_再热蒸汽入口', 'p'), ('1#发电锅炉_再热蒸汽高再出口', 'p'), ('1#发电锅炉_水侧上省入口', 'p'), ('1#发电锅炉_水侧下省入口', 'p'), ('1#发电锅炉_水泵入口', 'p'), ('1#发电锅炉_水泵出口', 'p'), ('1#发电锅炉_汽包给水入口', 'p'), ('1#发电锅炉_汽包饱和蒸汽出口', 'p'), ('1#发电锅炉_蒸汽三过出口', 'p'), ('1#发电锅炉_蒸汽低过出口', 'p'), ('1#发电锅炉_蒸汽屏过出口', 'p'), ('抽凝式汽轮机1_中压缸排气出口', 'p'), ('抽凝式汽轮机1_再热蒸汽去1段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去2段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去3段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去4段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去5段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去6段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸2段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸3段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸4段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸5段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸6段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸7段', 'p'), ('抽凝式汽轮机1_再热蒸汽去排气阀门', 'p'), ('抽凝式汽轮机1_蒸汽去中压缸1段', 'p'), ('抽凝式汽轮机1_高压缸一段蒸汽抽汽分离', 'p'), ('抽凝式汽轮机1_高压缸排汽', 'p'), ('抽凝式汽轮机1_高压蒸汽去排气阀门', 'p'), ('抽凝式汽轮机1_高压蒸汽去高压缸1段', 'p'), ('抽凝式汽轮机1_高压蒸汽去高压缸2段', 'p') caused by the equations ('1#发电锅炉_三级过热器', 'pr2'), ('1#发电锅炉_上级省煤器', 'pr2'), ('1#发电锅炉_下级省煤器', 'pr2'), ('1#发电锅炉_低温再热器', 'pr2'), ('1#发电锅炉_低温过热器', 'pr2'), ('1#发电锅炉_屏式过热器', 'pr2'), ('1#发电锅炉_末级再热器', 'pr2'), ('1#发电锅炉_末级过热器', 'pr2'), ('1#发电锅炉_汽包', 'pressure_constraints'), ('1#发电锅炉_汽包', 'pressure_constraints'), ('1#发电锅炉_汽包', 'pressure_constraints'), ('1#发电锅炉_给水泵', 'pr'), ('1#发电锅炉_进水阀', 'pr'), ('凝汽器回路', 'pressure_equality_constraint'), ('抽凝式汽轮机1_中压缸排气阀', 'pr'), ('抽凝式汽轮机1_中压缸进气阀', 'pr'), ('抽凝式汽轮机1_低压缸一段', 'pr'), ('抽凝式汽轮机1_低压缸七段', 'pr'), ('抽凝式汽轮机1_低压缸三段', 'pr'), ('抽凝式汽轮机1_低压缸二段', 'pr'), ('抽凝式汽轮机1_低压缸五段', 'pr'), ('抽凝式汽轮机1_低压缸六段', 'pr'), ('抽凝式汽轮机1_低压缸四段', 'pr'), ('抽凝式汽轮机1_再热蒸汽1段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽1段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽2段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽2段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽3段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽3段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽4段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽4段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽5段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽5段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽6段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽6段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸一段', 'pr'), ('抽凝式汽轮机1_高压缸一段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸一段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸二段', 'pr'), ('抽凝式汽轮机1_高压缸排气阀', 'pr'), ('抽凝式汽轮机1_高压缸排汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸排汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸进气阀', 'pr') has been detected. This overdetermines the problem.
+✓ 加载了 66 条连接定义
+✓ 加载了 28 个组件定义
+
+================================================================================
+完整建模 - 基于connections.csv的完整复刻
+================================================================================
+
+[1] 定义组件...
+   已定义 60 个组件
+
+[2] 定义连接...
+   已定义 64 个连接
+
+[3] 设置组件参数...
+   ✓ 组件参数设置完成
+
+[4] 设置边界条件...
+   ✓ 边界条件设置完成
+================================================================================
+
+开始求解...
+警告: 由于模型复杂性，初次求解可能需要较长时间...
+✗ 求解失败: A circular dependency between the variables ('1#发电锅炉_主蒸汽', 'p'), ('1#发电锅炉_再热蒸汽低再出口', 'p'), ('1#发电锅炉_再热蒸汽入口', 'p'), ('1#发电锅炉_再热蒸汽高再出口', 'p'), ('1#发电锅炉_水侧上省入口', 'p'), ('1#发电锅炉_水侧下省入口', 'p'), ('1#发电锅炉_水泵入口', 'p'), ('1#发电锅炉_水泵出口', 'p'), ('1#发电锅炉_汽包给水入口', 'p'), ('1#发电锅炉_汽包饱和蒸汽出口', 'p'), ('1#发电锅炉_蒸汽三过出口', 'p'), ('1#发电锅炉_蒸汽低过出口', 'p'), ('1#发电锅炉_蒸汽屏过出口', 'p'), ('抽凝式汽轮机1_中压缸排气出口', 'p'), ('抽凝式汽轮机1_再热蒸汽去1段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去2段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去3段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去4段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去5段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去6段抽汽分离', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸2段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸3段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸4段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸5段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸6段', 'p'), ('抽凝式汽轮机1_再热蒸汽去中压缸7段', 'p'), ('抽凝式汽轮机1_再热蒸汽去排气阀门', 'p'), ('抽凝式汽轮机1_蒸汽去中压缸1段', 'p'), ('抽凝式汽轮机1_高压缸一段蒸汽抽汽分离', 'p'), ('抽凝式汽轮机1_高压缸排汽', 'p'), ('抽凝式汽轮机1_高压蒸汽去排气阀门', 'p'), ('抽凝式汽轮机1_高压蒸汽去高压缸1段', 'p'), ('抽凝式汽轮机1_高压蒸汽去高压缸2段', 'p') caused by the equations ('1#发电锅炉_三级过热器', 'pr2'), ('1#发电锅炉_上级省煤器', 'pr2'), ('1#发电锅炉_下级省煤器', 'pr2'), ('1#发电锅炉_低温再热器', 'pr2'), ('1#发电锅炉_低温过热器', 'pr2'), ('1#发电锅炉_屏式过热器', 'pr2'), ('1#发电锅炉_末级再热器', 'pr2'), ('1#发电锅炉_末级过热器', 'pr2'), ('1#发电锅炉_汽包', 'pressure_constraints'), ('1#发电锅炉_汽包', 'pressure_constraints'), ('1#发电锅炉_汽包', 'pressure_constraints'), ('1#发电锅炉_给水泵', 'pr'), ('1#发电锅炉_进水阀', 'pr'), ('凝汽器回路', 'pressure_equality_constraint'), ('抽凝式汽轮机1_中压缸排气阀', 'pr'), ('抽凝式汽轮机1_中压缸进气阀', 'pr'), ('抽凝式汽轮机1_低压缸一段', 'pr'), ('抽凝式汽轮机1_低压缸七段', 'pr'), ('抽凝式汽轮机1_低压缸三段', 'pr'), ('抽凝式汽轮机1_低压缸二段', 'pr'), ('抽凝式汽轮机1_低压缸五段', 'pr'), ('抽凝式汽轮机1_低压缸六段', 'pr'), ('抽凝式汽轮机1_低压缸四段', 'pr'), ('抽凝式汽轮机1_再热蒸汽1段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽1段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽2段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽2段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽3段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽3段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽4段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽4段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽5段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽5段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽6段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_再热蒸汽6段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸一段', 'pr'), ('抽凝式汽轮机1_高压缸一段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸一段抽汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸二段', 'pr'), ('抽凝式汽轮机1_高压缸排气阀', 'pr'), ('抽凝式汽轮机1_高压缸排汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸排汽分离', 'pressure_constraints'), ('抽凝式汽轮机1_高压缸进气阀', 'pr') has been detected. This overdetermines the problem.
+================================================================================
+✗ 求解失败
+================================================================================
