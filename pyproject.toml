@@ -44,6 +44,8 @@ include = [
     "tutorial/",
     "myloggings/",
     "boiler-turbine_design_state/",
+    "*.json",
+    "csv_state_export_folder/",
 ]
 exclude = [
     "docs/_build",
