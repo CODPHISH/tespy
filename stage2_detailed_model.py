@@ -76,7 +76,18 @@ class CompleteBoilerTurbineModel:
         print("完整建模 - 基于connections.csv的完整复刻")
         print("=" * 80)
 
-        nw = Network(iterinfo=True)
+        nw = Network(
+            iterinfo=True,
+            fluids=[
+                "water",
+                "N2",
+                "O2",
+                "CO2",
+                "CO",
+                "H2",
+                "CH4",
+            ],
+        )
         nw.units.set_defaults(
             temperature="C",
             pressure="bar",
@@ -118,8 +129,8 @@ class CompleteBoilerTurbineModel:
         split_lp6 = Splitter("抽凝式汽轮机1_再热蒸汽6段抽汽分离")
         
         # 混合器 (2个)
-        merge_air = Merge("1#发电锅炉_空气混合器")
-        merge_fuel = Merge("1#发电锅炉_燃料气混合器")
+        merge_fuel_1 = Merge("1#发电锅炉_燃料气混合器1")  # 高炉煤气 + 转炉煤气
+        merge_fuel_2 = Merge("1#发电锅炉_燃料气混合器2")  # 混合气 + 焦炉煤气
         
         # 换热器 (11个)
         hx_air_preheat = HeatExchanger("1#发电锅炉_空气预热器")
@@ -152,14 +163,21 @@ class CompleteBoilerTurbineModel:
         src_cog = Source("1#发电锅炉_转炉煤气源")
         src_coke = Source("1#发电锅炉_焦炉煤气源")
         
-        # 汇 (2个)
+        # 汇 (9个：烟气出口 + 各抽汽出口)
         sink_flue = Sink("1#发电锅炉_烟气出口汇")
-        sink_turbine = Sink("抽凝式汽轮机1_排气出口汇")
+        sink_hp1_ext = Sink("抽凝式汽轮机1_高压蒸汽高压缸一段抽汽出口汇")
+        sink_hp_exhaust_ext = Sink("抽凝式汽轮机1_高压缸排汽抽汽汇")
+        sink_lp1_ext = Sink("抽凝式汽轮机1_再热蒸汽1段抽汽出口汇")
+        sink_lp2_ext = Sink("抽凝式汽轮机1_再热蒸汽2段抽汽出口汇")
+        sink_lp3_ext = Sink("抽凝式汽轮机1_再热蒸汽3段抽汽出口汇")
+        sink_lp4_ext = Sink("抽凝式汽轮机1_再热蒸汽4段抽汽出口汇")
+        sink_lp5_ext = Sink("抽凝式汽轮机1_再热蒸汽5段抽汽出口汇")
+        sink_lp6_ext = Sink("抽凝式汽轮机1_再热蒸汽6段抽汽出口汇")
         
         # CycleCloser  
         cc_condenser = CycleCloser("凝汽器回路")
         
-        total_comps = 53
+        total_comps = 60
         print(f"   已定义 {total_comps} 个组件")
         
         # ==================== 连接定义 ====================
@@ -183,11 +201,11 @@ class CompleteBoilerTurbineModel:
         c_valve_hp_in_out = Connection(valve_hp_in, "out1", turb_hp1, "in1", label="抽凝式汽轮机1_高压蒸汽去高压缸1段")
         c_hp1_out = Connection(turb_hp1, "out1", split_hp1, "in1", label="抽凝式汽轮机1_高压缸一段蒸汽抽汽分离")
         c_hp1_main = Connection(split_hp1, "out1", turb_hp2, "in1", label="抽凝式汽轮机1_高压蒸汽去高压缸2段")
-        c_hp1_ext = Connection(split_hp1, "out2", sink_turbine, "in1", label="抽凝式汽轮机1_高压蒸汽高压缸一段抽汽出口")
+        c_hp1_ext = Connection(split_hp1, "out2", sink_hp1_ext, "in1", label="抽凝式汽轮机1_高压蒸汽高压缸一段抽汽出口")
         c_hp2_out = Connection(turb_hp2, "out1", valve_hp_out, "in1", label="抽凝式汽轮机1_高压蒸汽去排气阀门")
         c_hp_exhaust_full = Connection(valve_hp_out, "out1", split_hp_exhaust, "in1", label="抽凝式汽轮机1_高压缸排汽")
         c_hp_exhaust_main = Connection(split_hp_exhaust, "out1", hx_rh_low, "in2", label="1#发电锅炉_再热蒸汽入口")
-        c_hp_ext_tap = Connection(split_hp_exhaust, "out2", sink_turbine, "in2", label="抽凝式汽轮机1_高压缸排汽抽汽")
+        c_hp_ext_tap = Connection(split_hp_exhaust, "out2", sink_hp_exhaust_ext, "in1", label="抽凝式汽轮机1_高压缸排汽抽汽")
         
         # 【再热路径】
         c_rh_low_out = Connection(hx_rh_low, "out2", hx_rh_final, "in2", label="1#发电锅炉_再热蒸汽低再出口")
@@ -197,41 +215,44 @@ class CompleteBoilerTurbineModel:
         # 【低压缸路径 - 7段，每段后抽汽】
         c_lp1_out = Connection(turb_lp1, "out1", split_lp1, "in1", label="抽凝式汽轮机1_再热蒸汽去1段抽汽分离")
         c_lp1_main = Connection(split_lp1, "out1", turb_lp2, "in1", label="抽凝式汽轮机1_再热蒸汽去中压缸2段")
-        c_lp1_ext = Connection(split_lp1, "out2", sink_turbine, "in3", label="抽凝式汽轮机1_再热蒸汽1段抽汽出口")
+        c_lp1_ext = Connection(split_lp1, "out2", sink_lp1_ext, "in1", label="抽凝式汽轮机1_再热蒸汽1段抽汽出口")
         
         c_lp2_out = Connection(turb_lp2, "out1", split_lp2, "in1", label="抽凝式汽轮机1_再热蒸汽去2段抽汽分离")
         c_lp2_main = Connection(split_lp2, "out1", turb_lp3, "in1", label="抽凝式汽轮机1_再热蒸汽去中压缸3段")
-        c_lp2_ext = Connection(split_lp2, "out2", sink_turbine, "in4", label="抽凝式汽轮机1_再热蒸汽2段抽汽出口")
+        c_lp2_ext = Connection(split_lp2, "out2", sink_lp2_ext, "in1", label="抽凝式汽轮机1_再热蒸汽2段抽汽出口")
         
         c_lp3_out = Connection(turb_lp3, "out1", split_lp3, "in1", label="抽凝式汽轮机1_再热蒸汽去3段抽汽分离")
         c_lp3_main = Connection(split_lp3, "out1", turb_lp4, "in1", label="抽凝式汽轮机1_再热蒸汽去中压缸4段")
-        c_lp3_ext = Connection(split_lp3, "out2", sink_turbine, "in5", label="抽凝式汽轮机1_再热蒸汽3段抽汽出口")
+        c_lp3_ext = Connection(split_lp3, "out2", sink_lp3_ext, "in1", label="抽凝式汽轮机1_再热蒸汽3段抽汽出口")
         
         c_lp4_out = Connection(turb_lp4, "out1", split_lp4, "in1", label="抽凝式汽轮机1_再热蒸汽去4段抽汽分离")
         c_lp4_main = Connection(split_lp4, "out1", turb_lp5, "in1", label="抽凝式汽轮机1_再热蒸汽去中压缸5段")
-        c_lp4_ext = Connection(split_lp4, "out2", sink_turbine, "in6", label="抽凝式汽轮机1_再热蒸汽4段抽汽出口")
+        c_lp4_ext = Connection(split_lp4, "out2", sink_lp4_ext, "in1", label="抽凝式汽轮机1_再热蒸汽4段抽汽出口")
         
         c_lp5_out = Connection(turb_lp5, "out1", split_lp5, "in1", label="抽凝式汽轮机1_再热蒸汽去5段抽汽分离")
         c_lp5_main = Connection(split_lp5, "out1", turb_lp6, "in1", label="抽凝式汽轮机1_再热蒸汽去中压缸6段")
-        c_lp5_ext = Connection(split_lp5, "out2", sink_turbine, "in7", label="抽凝式汽轮机1_再热蒸汽5段抽汽出口")
+        c_lp5_ext = Connection(split_lp5, "out2", sink_lp5_ext, "in1", label="抽凝式汽轮机1_再热蒸汽5段抽汽出口")
         
         c_lp6_out = Connection(turb_lp6, "out1", split_lp6, "in1", label="抽凝式汽轮机1_再热蒸汽去6段抽汽分离")
         c_lp6_main = Connection(split_lp6, "out1", turb_lp7, "in1", label="抽凝式汽轮机1_再热蒸汽去中压缸7段")
-        c_lp6_ext = Connection(split_lp6, "out2", sink_turbine, "in8", label="抽凝式汽轮机1_再热蒸汽6段抽汽出口")
+        c_lp6_ext = Connection(split_lp6, "out2", sink_lp6_ext, "in1", label="抽凝式汽轮机1_再热蒸汽6段抽汽出口")
         
         c_lp7_out = Connection(turb_lp7, "out1", valve_mp_out, "in1", label="抽凝式汽轮机1_再热蒸汽去排气阀门")
         c_turbine_exhaust = Connection(valve_mp_out, "out1", cc_condenser, "in1", label="抽凝式汽轮机1_中压缸排气出口")
         
         # 【燃料气/空气侧】
-        c_air_in = Connection(src_air, "out1", merge_air, "in1", label="1#发电锅炉_空气入口")
-        c_air_mixed = Connection(merge_air, "out1", hx_air_preheat, "in2", label="1#发电锅炉_空气混合加热空气入口")
+        # 注：由于Merge需要2个inlet，但第二个空气入口在CSV中流量为0，我们简化为只用一个空气源
+        # 直接连接到预热器，绕过Merge
+        c_air_in = Connection(src_air, "out1", hx_air_preheat, "in2", label="1#发电锅炉_空气入口")
         c_air_preheated = Connection(hx_air_preheat, "out2", combustor, "in1", label="1#发电锅炉_空气锅炉入口")
         
-        c_bfg_in = Connection(src_bfg, "out1", merge_fuel, "in1", label="boiler1_高炉煤气入口")
-        c_cog_in = Connection(src_cog, "out1", merge_fuel, "in2", label="1#发电锅炉_转炉煤气入口")
-        c_fuel_mixed = Connection(merge_fuel, "out1", hx_fuel_preheat, "in2", label="1#发电锅炉_高转煤气混合后")
-        c_coke_in = Connection(src_coke, "out1", combustor, "in3", label="1#发电锅炉_焦炉煤气入口")
-        c_fuel_preheated = Connection(hx_fuel_preheat, "out2", combustor, "in2", label="1#发电锅炉_高转煤气预热后")
+        # 燃料气混合 (高炉煤气 + 转炉煤气 -> 预热器 -> + 焦炉煤气 -> 燃烧室)
+        c_bfg_in = Connection(src_bfg, "out1", merge_fuel_1, "in1", label="boiler1_高炉煤气入口")
+        c_cog_in = Connection(src_cog, "out1", merge_fuel_1, "in2", label="1#发电锅炉_转炉煤气入口")
+        c_fuel_mixed_1 = Connection(merge_fuel_1, "out1", hx_fuel_preheat, "in2", label="1#发电锅炉_高转煤气混合后")
+        c_fuel_preheated = Connection(hx_fuel_preheat, "out2", merge_fuel_2, "in1", label="1#发电锅炉_高转煤气预热后")
+        c_coke_in = Connection(src_coke, "out1", merge_fuel_2, "in2", label="1#发电锅炉_焦炉煤气入口")
+        c_fuel_final = Connection(merge_fuel_2, "out1", combustor, "in2", label="1#发电锅炉_混合燃料气锅炉入口")
         
         # 【烟气侧】
         c_flue_combustor = Connection(combustor, "out1", hx_sh_final, "in1", label="1#发电锅炉_燃烧烟气")
@@ -268,9 +289,8 @@ class CompleteBoilerTurbineModel:
             c_lp6_out, c_lp6_main, c_lp6_ext,
             c_lp7_out, c_turbine_exhaust,
             # 燃料气/空气
-            c_air_in, c_air_mixed, c_air_preheated,
-            c_bfg_in, c_cog_in, c_fuel_mixed,
-            c_coke_in, c_fuel_preheated,
+            c_air_in, c_air_preheated,
+            c_bfg_in, c_cog_in, c_fuel_mixed_1, c_fuel_preheated, c_coke_in, c_fuel_final,
             # 烟气
             c_flue_combustor, c_flue_1, c_flue_2, c_flue_3, c_flue_4, c_flue_5,
             c_flue_6, c_flue_7, c_flue_8, c_flue_9, c_flue_10, c_flue_11, c_flue_out,
@@ -379,21 +399,61 @@ class CompleteBoilerTurbineModel:
         print("   ✓ 组件参数设置完成")
 
     def _set_boundary_conditions(self, nw: Network) -> None:
-        """设置边界条件（从connections.csv读取）"""
+        """设置边界条件（从connections.csv读取）
         
-        # 从CSV读取连接数据
+        策略：只设置真正的入口边界条件，其他使用初始值避免过度约束
+        """
+        
+        # 从CSV读取连接数据作为初始值参考
         conn_data = {}
         for _, row in self.conn_df.iterrows():
             label = row.iloc[0]
+            fluids = {}
+            # TESPy流体命名：使用CoolProp标准名称
+            fluid_map = {
+                'H2O': 'water',
+                'N2': 'N2',
+                'O2': 'O2',
+                'CO2': 'CO2',
+                'CO': 'CO',
+                'H2': 'H2',
+                'CH4': 'CH4'
+            }
+            for csv_fluid, tespy_fluid in fluid_map.items():
+                if csv_fluid in row.index and pd.notna(row[csv_fluid]):
+                    if row[csv_fluid] > 0:
+                        fluids[tespy_fluid] = row[csv_fluid]
             conn_data[label] = {
                 'm': row['m'],
                 'p': row['p'],
                 'T': row['T'],
                 'h': row['h'],
                 'x': row['x'] if pd.notna(row['x']) else None,
+                'fluid': fluids,
             }
         
-        # 主蒸汽
+        # === 设置所有连接的初始值（不固定） ===
+        for label, data in conn_data.items():
+            try:
+                conn = nw.get_conn(label)
+                if conn is None:
+                    continue
+                # 使用初始值而非固定值
+                if pd.notna(data['m']) and data['m'] > 0:
+                    conn.set_attr(m0=data['m'])
+                if pd.notna(data['p']):
+                    conn.set_attr(p0=data['p'])
+                if pd.notna(data['T']):
+                    conn.set_attr(T0=data['T'])
+                # 设置流体组分
+                if data['fluid']:
+                    conn.set_attr(fluid=data['fluid'])
+            except KeyError:
+                pass
+        
+        # === 仅设置关键固定边界条件 ===
+        
+        # 主蒸汽：固定流量、压力、温度
         try:
             conn = nw.get_conn("1#发电锅炉_主蒸汽")
             data = conn_data.get("1#发电锅炉_主蒸汽", {})
@@ -401,42 +461,42 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 空气入口
+        # 空气入口：固定流量、压力、温度
         try:
             conn = nw.get_conn("1#发电锅炉_空气入口")
             data = conn_data.get("1#发电锅炉_空气入口", {})
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'n2': 0.76, 'o2': 0.24})
+            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'N2': 0.76, 'O2': 0.24})
         except KeyError:
             pass
         
-        # 高炉煤气入口
+        # 高炉煤气入口：固定流量、压力、温度
         try:
             conn = nw.get_conn("boiler1_高炉煤气入口")
             data = conn_data.get("boiler1_高炉煤气入口", {})
-            fluid_comp = {'n2': 0.4609, 'co': 0.2078, 'co2': 0.3293, 'h2': 0.002}
+            fluid_comp = {'N2': 0.4609, 'CO': 0.2078, 'CO2': 0.3293, 'H2': 0.002}
             conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
         except KeyError:
             pass
         
-        # 转炉煤气
+        # 转炉煤气：固定流量、压力、温度
         try:
             conn = nw.get_conn("1#发电锅炉_转炉煤气入口")
             data = conn_data.get("1#发电锅炉_转炉煤气入口", {})
-            fluid_comp = {'n2': 0.3389, 'co': 0.4223, 'co2': 0.2381, 'h2': 0.0007}
+            fluid_comp = {'N2': 0.3389, 'CO': 0.4223, 'CO2': 0.2381, 'H2': 0.0007}
             conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
         except KeyError:
             pass
         
-        # 焦炉煤气
+        # 焦炉煤气：固定流量、压力、温度
         try:
             conn = nw.get_conn("1#发电锅炉_焦炉煤气入口")
             data = conn_data.get("1#发电锅炉_焦炉煤气入口", {})
-            fluid_comp = {'n2': 0.2018, 'co': 0.2305, 'co2': 0.0996, 'h2': 0.1311, 'ch4': 0.337}
+            fluid_comp = {'N2': 0.2018, 'CO': 0.2305, 'CO2': 0.0996, 'H2': 0.1311, 'CH4': 0.337}
             conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
         except KeyError:
             pass
         
-        # 泵入口
+        # 泵入口（凝结水）：固定压力和温度
         try:
             conn = nw.get_conn("1#发电锅炉_水泵入口")
             data = conn_data.get("1#发电锅炉_水泵入口", {})
@@ -444,14 +504,14 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 汽包饱和蒸汽
+        # 汽包饱和蒸汽：固定干度
         try:
             conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
             conn.set_attr(x=1.0)
         except KeyError:
             pass
         
-        # 高压缸排汽抽汽
+        # 高压缸排汽抽汽：固定流量
         try:
             conn = nw.get_conn("抽凝式汽轮机1_高压缸排汽抽汽")
             data = conn_data.get("抽凝式汽轮机1_高压缸排汽抽汽", {})
@@ -459,7 +519,7 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 所有抽汽出口设置为0流量（从CSV看这些都是0）
+        # 所有低压缸抽汽出口设置为0流量（从CSV看这些都是0）
         for i in range(1, 7):
             try:
                 label = f"抽凝式汽轮机1_再热蒸汽{i}段抽汽出口"
@@ -475,7 +535,7 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        print("   ✓ 边界条件设置完成")
+        print("   ✓ 边界条件设置完成（使用初始值策略避免过度约束）")
 
     def solve(self) -> bool:
         """求解网络"""
