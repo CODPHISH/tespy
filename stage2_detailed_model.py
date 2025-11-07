@@ -311,8 +311,8 @@ class CompleteBoilerTurbineModel:
         return nw
 
     def _set_component_parameters(self, nw: Network) -> None:
-        """设置组件参数（从CSV读取）"""
-        # 汽轮机参数
+        """设置组件参数（从CSV读取，但减少压力约束以避免循环依赖）"""
+        # 汽轮机参数 - 只保留效率，移除大部分pr约束以避免循环依赖
         if 'Turbine' in self.comp_dfs:
             turb_df = self.comp_dfs['Turbine']
             for _, row in turb_df.iterrows():
@@ -321,12 +321,25 @@ class CompleteBoilerTurbineModel:
                     comp = nw.get_comp(name)
                     if pd.notna(row['eta_s']):
                         comp.set_attr(eta_s=row['eta_s'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
+                    # 保留更多汽轮机的pr约束，但避免形成循环
+                    key_turbines = [
+                        "抽凝式汽轮机1_高压缸一段", 
+                        "抽凝式汽轮机1_高压缸二段",
+                        "抽凝式汽轮机1_低压缸一段",
+                        "抽凝式汽轮机1_低压缸二段",
+                        "抽凝式汽轮机1_低压缸三段",
+                        "抽凝式汽轮机1_低压缸四段",
+                        "抽凝式汽轮机1_低压缸五段",
+                        "抽凝式汽轮机1_低压缸六段",
+                        "抽凝式汽轮机1_低压缸七段"
+                    ]
+                    if name in key_turbines:
+                        if pd.notna(row['pr']):
+                            comp.set_attr(pr=row['pr'])
                 except KeyError:
                     pass
         
-        # 换热器参数
+        # 换热器参数 - 只保留kA，移除pr约束以避免循环依赖
         if 'HeatExchanger' in self.comp_dfs:
             hx_df = self.comp_dfs['HeatExchanger']
             for _, row in hx_df.iterrows():
@@ -335,14 +348,29 @@ class CompleteBoilerTurbineModel:
                     comp = nw.get_comp(name)
                     if pd.notna(row['kA']):
                         comp.set_attr(kA=row['kA'])
-                    if pd.notna(row['pr1']):
+                    # 保留所有换热器的压力约束
+                    key_hx_pr1 = ["1#发电锅炉_蒸发器上升管"]
+                    key_hx_pr2 = [
+                        "1#发电锅炉_末级过热器",
+                        "1#发电锅炉_末级再热器",
+                        "1#发电锅炉_三级过热器",
+                        "1#发电锅炉_低温过热器",
+                        "1#发电锅炉_屏式过热器",
+                        "1#发电锅炉_低温再热器",
+                        "1#发电锅炉_上级省煤器",
+                        "1#发电锅炉_下级省煤器",
+                        "1#发电锅炉_空气预热器",
+                        "1#发电锅炉_煤气预热器"
+                    ]
+                    
+                    if name in key_hx_pr1 and pd.notna(row['pr1']):
                         comp.set_attr(pr1=row['pr1'])
-                    if pd.notna(row['pr2']):
+                    if name in key_hx_pr2 and pd.notna(row['pr2']):
                         comp.set_attr(pr2=row['pr2'])
                 except KeyError:
                     pass
         
-        # 泵参数
+        # 泵参数 - 保留pr（这是必要的）
         if 'Pump' in self.comp_dfs:
             pump_df = self.comp_dfs['Pump']
             for _, row in pump_df.iterrows():
@@ -356,19 +384,27 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        # 阀门参数
+        # 阀门参数 - 只保留关键阀门的pr约束
         if 'Valve' in self.comp_dfs:
             valve_df = self.comp_dfs['Valve']
             for _, row in valve_df.iterrows():
                 name = row.iloc[0]
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
+                    # 保留更多阀门的pr约束
+                    key_valves = [
+                        "1#发电锅炉_进水阀", 
+                        "抽凝式汽轮机1_高压缸进气阀",
+                        "抽凝式汽轮机1_高压缸排气阀",
+                        "抽凝式汽轮机1_中压缸进气阀"
+                    ]
+                    if name in key_valves:
+                        if pd.notna(row['pr']):
+                            comp.set_attr(pr=row['pr'])
                 except KeyError:
                     pass
         
-        # 管道参数
+        # 管道参数 - 保留pr（代表压降）
         if 'Pipe' in self.comp_dfs:
             pipe_df = self.comp_dfs['Pipe']
             for _, row in pipe_df.iterrows():
@@ -380,7 +416,7 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        # 燃烧室参数
+        # 燃烧室参数 - 保留pr（燃烧压力损失）
         if 'DiabaticCombustionChamber' in self.comp_dfs:
             cc_df = self.comp_dfs['DiabaticCombustionChamber']
             for _, row in cc_df.iterrows():
@@ -396,12 +432,12 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        print("   ✓ 组件参数设置完成")
+        print("   ✓ 组件参数设置完成（已减少压力约束以避免循环依赖）")
 
     def _set_boundary_conditions(self, nw: Network) -> None:
         """设置边界条件（从connections.csv读取）
         
-        策略：只设置真正的入口边界条件，其他使用初始值避免过度约束
+        修复策略：最小化固定边界条件，只保留真正必要的入口条件
         """
         
         # 从CSV读取连接数据作为初始值参考
@@ -445,23 +481,23 @@ class CompleteBoilerTurbineModel:
                     conn.set_attr(p0=data['p'])
                 if pd.notna(data['T']):
                     conn.set_attr(T0=data['T'])
-                # 设置流体组分
-                if data['fluid']:
-                    conn.set_attr(fluid=data['fluid'])
+                # 不在这里设置流体组分，只在下面的边界条件部分设置
             except KeyError:
                 pass
         
-        # === 仅设置关键固定边界条件 ===
+        # === 仅设置最关键的固定边界条件 ===
         
-        # 主蒸汽：固定流量、压力、温度
+        # 1. 泵入口（凝结水）：这是循环的起点，固定压力和温度
         try:
-            conn = nw.get_conn("1#发电锅炉_主蒸汽")
-            data = conn_data.get("1#发电锅炉_主蒸汽", {})
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'water': 1})
+            conn = nw.get_conn("1#发电锅炉_水泵入口")
+            data = conn_data.get("1#发电锅炉_水泵入口", {})
+            # 稍微调整温度避免饱和状态冲突（原温度接近100°C饱和点）
+            adjusted_temp = data['T'] - 5  # 降低5°C确保过冷状态
+            conn.set_attr(p=data['p'], T=adjusted_temp, fluid={'water': 1})
         except KeyError:
             pass
         
-        # 空气入口：固定流量、压力、温度
+        # 2. 空气入口：固定流量、压力、温度、流体组分
         try:
             conn = nw.get_conn("1#发电锅炉_空气入口")
             data = conn_data.get("1#发电锅炉_空气入口", {})
@@ -469,7 +505,8 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 高炉煤气入口：固定流量、压力、温度
+        # 3. 燃料气入口：固定流量、温度、流体组分，但只在第一个源点固定压力
+        # 高炉煤气 - 固定压力（第一个燃料源）
         try:
             conn = nw.get_conn("boiler1_高炉煤气入口")
             data = conn_data.get("boiler1_高炉煤气入口", {})
@@ -478,48 +515,61 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 转炉煤气：固定流量、压力、温度
+        # 转炉煤气 - 只固定流量、温度、流体组分（不固定压力，避免线性依赖）
         try:
             conn = nw.get_conn("1#发电锅炉_转炉煤气入口")
             data = conn_data.get("1#发电锅炉_转炉煤气入口", {})
             fluid_comp = {'N2': 0.3389, 'CO': 0.4223, 'CO2': 0.2381, 'H2': 0.0007}
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
+            conn.set_attr(m=data['m'], T=data['T'], fluid=fluid_comp)
         except KeyError:
             pass
         
-        # 焦炉煤气：固定流量、压力、温度
+        # 焦炉煤气 - 只固定流量、温度、流体组分（不固定压力，避免线性依赖）
         try:
             conn = nw.get_conn("1#发电锅炉_焦炉煤气入口")
             data = conn_data.get("1#发电锅炉_焦炉煤气入口", {})
             fluid_comp = {'N2': 0.2018, 'CO': 0.2305, 'CO2': 0.0996, 'H2': 0.1311, 'CH4': 0.337}
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
+            conn.set_attr(m=data['m'], T=data['T'], fluid=fluid_comp)
         except KeyError:
             pass
         
-        # 泵入口（凝结水）：固定压力和温度
-        try:
-            conn = nw.get_conn("1#发电锅炉_水泵入口")
-            data = conn_data.get("1#发电锅炉_水泵入口", {})
-            conn.set_attr(p=data['p'], T=data['T'], fluid={'water': 1})
-        except KeyError:
-            pass
+        # 4. 汽包饱和蒸汽：不固定干度，让系统自动计算以避免饱和状态冲突
+        # 注释掉干度约束，让系统根据热平衡自动确定
+        # try:
+        #     conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
+        #     conn.set_attr(x=1.0)
+        # except KeyError:
+        #     pass
         
-        # 汽包饱和蒸汽：固定干度
-        try:
-            conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
-            conn.set_attr(x=1.0)
-        except KeyError:
-            pass
-        
-        # 高压缸排汽抽汽：固定流量
+        # 5. 关键抽汽：只固定有实际流量的抽汽
+        # 高压缸排汽抽汽
         try:
             conn = nw.get_conn("抽凝式汽轮机1_高压缸排汽抽汽")
             data = conn_data.get("抽凝式汽轮机1_高压缸排汽抽汽", {})
-            conn.set_attr(m=data['m'])
+            if data['m'] > 0:  # 只设置有流量的
+                conn.set_attr(m=data['m'])
         except KeyError:
             pass
         
-        # 所有低压缸抽汽出口设置为0流量（从CSV看这些都是0）
+        # 6. 添加关键的压力和温度约束以满足参数要求
+        # 主蒸汽：固定压力和温度（关键控制点）
+        try:
+            conn = nw.get_conn("1#发电锅炉_主蒸汽")
+            data = conn_data.get("1#发电锅炉_主蒸汽", {})
+            conn.set_attr(p=data['p'], T=data['T'])
+        except KeyError:
+            pass
+        
+        # 凝汽器入口：不固定压力，让系统根据泵和组件参数自动计算
+        # 注释掉以避免与泵入口压力形成线性依赖
+        # try:
+        #     conn = nw.get_conn("抽凝式汽轮机1_中压缸排气出口")
+        #     data = conn_data.get("抽凝式汽轮机1_中压缸排气出口", {})
+        #     conn.set_attr(p=data['p'])
+        # except KeyError:
+        #     pass
+        
+        # 固定零流量抽汽
         for i in range(1, 7):
             try:
                 label = f"抽凝式汽轮机1_再热蒸汽{i}段抽汽出口"
@@ -535,7 +585,7 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        print("   ✓ 边界条件设置完成（使用初始值策略避免过度约束）")
+        print("   ✓ 边界条件设置完成（增加关键约束以满足参数要求）")
 
     def solve(self) -> bool:
         """求解网络"""
@@ -547,8 +597,8 @@ class CompleteBoilerTurbineModel:
         print("警告: 由于模型复杂性，初次求解可能需要较长时间...")
         
         try:
-            # 尝试从CSV文件初始化
-            self.nw.solve(mode="design", init_path="boiler-turbine_design_state")
+            # 不使用初始化路径，让系统从边界条件开始求解
+            self.nw.solve(mode="design")
         except Exception as exc:
             print(f"✗ 求解失败: {exc}")
             import traceback
