@@ -1,7 +1,48 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""完整复刻connections.csv的详细建模
-基于boiler-turbine_design_state目录下的CSV文件重建完整模型结构
+"""Stage 2 Detailed Boiler-Turbine Model - Refactored Input Strategy
+
+This module constructs a complete boiler-turbine system model based on the
+connections.csv and component CSV files in boiler-turbine_design_state directory.
+
+INPUT STRATEGY (see STAGE2_MODEL_VALIDATION.md for detailed audit):
+============================================================================
+
+This refactored version distinguishes between TRUE DESIGN INPUTS and SOLVER
+OUTPUTS to avoid over-constraining the system:
+
+1. FIXED BOUNDARY CONDITIONS (System Inlets):
+   - Main steam: mass flow, pressure, temperature
+   - Air inlet: mass flow, pressure, temperature, composition
+   - Fuel inlets (BFG, COG, Coke): mass flow, pressure, temperature, composition
+   - Pump inlet: pressure, temperature
+   - Extraction steam flows
+
+2. COMPONENT DESIGN PARAMETERS (True Inputs):
+   - Turbine/Pump isentropic efficiency (eta_s)
+   - Combustor air-fuel ratio (lamb) and efficiency (eta)
+   - Note: Heat exchanger kA values are NOT set as they are typically results
+     in design mode; instead, terminal temperature differences or heat duties
+     should be specified if needed.
+
+3. SOLVER OUTPUTS (NOT set as constraints):
+   - Component pressure ratios (pr) - these are RESULTS, not inputs
+   - Component power (P) and heat transfer (Q)
+   - All other calculated state variables
+
+4. INITIAL VALUES (Solver Starting Points):
+   - All intermediate connection states use p0, T0, m0 from CSV
+   - These guide convergence without constraining the solution space
+
+RATIONALE:
+----------
+Setting pressure ratios (pr) as fixed parameters over-constrains the network
+because they depend on inlet/outlet pressures that are also constrained. In
+design mode, the solver must compute pr from boundary conditions and component
+characteristics. Only efficiencies and operational settings (like lamb, eta)
+should be specified as fixed design parameters.
+
+See STAGE2_MODEL_VALIDATION.md for the complete input classification audit.
 """
 
 from __future__ import annotations
@@ -33,6 +74,16 @@ from tespy.components import (
     Pipe,
 )
 from tespy.connections import Connection, Ref
+
+# Cleaned input mapping derived from audit (STAGE2_MODEL_VALIDATION.md)
+AUDITED_COMPONENT_INPUTS: dict[str, tuple[str, ...]] = {
+    "Turbine": ("eta_s",),
+    "Pump": ("eta_s",),
+    "DiabaticCombustionChamber": ("lamb", "eta"),
+    # Other component types (HeatExchanger, Valve, Pipe, Splitter, Merge,
+    # Source, Sink, Drum, CycleCloser) do not have validated design inputs in
+    # the stage 2 audit and therefore are left unconstrained here.
+}
 
 
 class CompleteBoilerTurbineModel:
@@ -73,9 +124,20 @@ class CompleteBoilerTurbineModel:
         print(f"✓ 加载了 {sum(len(df) for df in self.comp_dfs.values())} 个组件定义")
 
     def build_network(self) -> Network:
-        """构建完整网络"""
+        """Build complete network using validated input mapping.
+        
+        This method constructs the network topology from connections.csv and
+        applies ONLY vetted design parameters (see AUDITED_COMPONENT_INPUTS).
+        
+        Key points:
+        - Component pressure ratios (pr) are NOT set (they are solver outputs)
+        - Only efficiencies (eta_s) and operational settings (lamb, eta) are set
+        - Boundary conditions at system inlets are fixed
+        - Intermediate states use initial values only (p0, T0, m0)
+        - No init_path dependency - network solves from scratch
+        """
         print("\n" + "=" * 80)
-        print("完整建模 - 基于connections.csv的完整复刻")
+        print("完整建模 - 基于connections.csv的完整复刻 (Refactored Input Strategy)")
         print("=" * 80)
 
         nw = Network(
@@ -313,97 +375,78 @@ class CompleteBoilerTurbineModel:
         return nw
 
     def _set_component_parameters(self, nw: Network) -> None:
-        """设置组件参数（从CSV读取）"""
-        # 汽轮机参数
-        if 'Turbine' in self.comp_dfs:
-            turb_df = self.comp_dfs['Turbine']
-            for _, row in turb_df.iterrows():
+        """Set component design parameters (validated inputs only).
+        
+        This method sets ONLY true design inputs, excluding solver outputs like
+        pressure ratios (pr), power (P), or heat transfer (Q).
+        
+        Design Inputs (from STAGE2_MODEL_VALIDATION.md audit):
+        --------------------------------------------------------
+        - Turbine/Pump: eta_s (isentropic efficiency)
+        - Combustor: lamb (air-fuel ratio), eta (combustion efficiency)
+        
+        Explicitly Excluded (solver outputs):
+        --------------------------------------
+        - pr (pressure ratio) for ALL components
+        - kA for heat exchangers (design mode computes these)
+        - P (power), Q (heat transfer)
+        
+        The CSV files contain complete solver results from a previous run, but
+        in design mode we must NOT set pr as it would over-constrain pressure
+        equations. The solver computes pr from inlet/outlet boundary conditions
+        and component characteristics.
+        """
+        
+        for comp_type, allowed_attrs in AUDITED_COMPONENT_INPUTS.items():
+            if comp_type not in self.comp_dfs or not allowed_attrs:
+                continue
+            df = self.comp_dfs[comp_type]
+            for _, row in df.iterrows():
                 name = row.iloc[0]
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['eta_s']):
-                        comp.set_attr(eta_s=row['eta_s'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
                 except KeyError:
-                    pass
-        
-        # 换热器参数
-        if 'HeatExchanger' in self.comp_dfs:
-            hx_df = self.comp_dfs['HeatExchanger']
-            for _, row in hx_df.iterrows():
-                name = row.iloc[0]
-                try:
-                    comp = nw.get_comp(name)
-                    if pd.notna(row['kA']):
-                        comp.set_attr(kA=row['kA'])
-                    if pd.notna(row['pr1']):
-                        comp.set_attr(pr1=row['pr1'])
-                    if pd.notna(row['pr2']):
-                        comp.set_attr(pr2=row['pr2'])
-                except KeyError:
-                    pass
-        
-        # 泵参数
-        if 'Pump' in self.comp_dfs:
-            pump_df = self.comp_dfs['Pump']
-            for _, row in pump_df.iterrows():
-                name = row.iloc[0]
-                try:
-                    comp = nw.get_comp(name)
-                    if pd.notna(row['eta_s']):
-                        comp.set_attr(eta_s=row['eta_s'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
-                except KeyError:
-                    pass
-        
-        # 阀门参数
-        if 'Valve' in self.comp_dfs:
-            valve_df = self.comp_dfs['Valve']
-            for _, row in valve_df.iterrows():
-                name = row.iloc[0]
-                try:
-                    comp = nw.get_comp(name)
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
-                except KeyError:
-                    pass
-        
-        # 管道参数
-        if 'Pipe' in self.comp_dfs:
-            pipe_df = self.comp_dfs['Pipe']
-            for _, row in pipe_df.iterrows():
-                name = row.iloc[0]
-                try:
-                    comp = nw.get_comp(name)
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
-                except KeyError:
-                    pass
-        
-        # 燃烧室参数
-        if 'DiabaticCombustionChamber' in self.comp_dfs:
-            cc_df = self.comp_dfs['DiabaticCombustionChamber']
-            for _, row in cc_df.iterrows():
-                name = row.iloc[0]
-                try:
-                    comp = nw.get_comp(name)
-                    if pd.notna(row['lamb']):
-                        comp.set_attr(lamb=row['lamb'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
-                    if pd.notna(row['eta']):
-                        comp.set_attr(eta=row['eta'])
-                except KeyError:
-                    pass
-        
-        print("   ✓ 组件参数设置完成")
+                    continue
+                set_kwargs = {}
+                for attr in allowed_attrs:
+                    if attr in row.index and pd.notna(row[attr]):
+                        set_kwargs[attr] = row[attr]
+                if set_kwargs:
+                    comp.set_attr(**set_kwargs)
+
+        print("   ✓ Component design parameters set (validated inputs only)")
+        print("     (applied attributes: "
+              f"{', '.join(sorted({attr for attrs in AUDITED_COMPONENT_INPUTS.values() for attr in attrs}))})")
 
     def _set_boundary_conditions(self, nw: Network) -> None:
-        """设置边界条件（从connections.csv读取）
+        """Set boundary conditions from connections.csv (validated input strategy).
         
-        策略：只设置真正的入口边界条件，其他使用初始值避免过度约束
+        This method implements the input classification strategy documented in
+        STAGE2_MODEL_VALIDATION.md (lines 58-80):
+        
+        STRATEGY:
+        ---------
+        1. Set FIXED constraints ONLY for true system boundary conditions
+           (inlets that define the design point)
+        2. Use INITIAL VALUES (p0, T0, m0) for all intermediate states
+           to guide convergence without over-constraining
+        
+        FIXED BOUNDARY CONDITIONS (see audit document):
+        -----------------------------------------------
+        - Main steam: m, p, T (defines turbine inlet conditions)
+        - Air inlet: m, p, T, fluid composition
+        - Fuel inlets (BFG, COG, Coke): m, p, T, fluid composition
+        - Pump inlet: p, T (condenser outlet conditions)
+        - Drum saturated steam: x=1.0 (saturated vapor)
+        - Extraction flows: m (for non-zero extraction demands)
+        
+        INITIAL VALUES (solver starting points):
+        -----------------------------------------
+        - All other connections use p0, T0, m0 from CSV
+        - These provide good starting points but don't constrain the solution
+        
+        This approach avoids circular pressure constraints that arise when both
+        connection pressures AND component pressure ratios are fixed.
         """
         
         # 从CSV读取连接数据作为初始值参考
@@ -522,7 +565,8 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 所有低压缸抽汽出口设置为0流量（从CSV看这些都是0）
+        # All low-pressure extraction ports are zero-flow design conditions
+        # (per audit). Fixing them to 0 avoids undesired loop mass flow.
         for i in range(1, 7):
             try:
                 label = f"抽凝式汽轮机1_再热蒸汽{i}段抽汽出口"
@@ -531,23 +575,36 @@ class CompleteBoilerTurbineModel:
             except KeyError:
                 pass
         
-        # 高压缸一段抽汽出口设置为0
+        # High-pressure stage extraction also zero per audit mapping
         try:
             conn = nw.get_conn("抽凝式汽轮机1_高压蒸汽高压缸一段抽汽出口")
             conn.set_attr(m=0.0)
         except KeyError:
             pass
         
-        print("   ✓ 边界条件设置完成（使用初始值策略避免过度约束）")
+        print("   ✓ 边界条件设置完成（validated input strategy applied）")
 
     def solve(
         self,
         *,
-        use_reference_init: bool = False,
-        allow_fallback: bool = True,
         max_iter: int | None = 200,
     ) -> bool:
-        """求解网络（默认使用CSV初始值而非导出的状态文件）"""
+        """Solve the network using validated inputs and CSV-derived initial values.
+        
+        CHANGES FROM PREVIOUS VERSION:
+        -------------------------------
+        - REMOVED init_path usage (no longer depends on saved solver states)
+        - REMOVED fallback to reference initialization
+        - Network now solves purely from boundary conditions + initial values
+        
+        The refactored input strategy (validated design parameters only + proper
+        boundary conditions) should enable convergence without requiring saved
+        solver states. Initial values (p0, T0, m0) from CSV guide the solver.
+        
+        If convergence issues occur, they indicate missing or incorrect boundary
+        conditions, not a need for init_path. Review boundary condition setup
+        in _set_boundary_conditions() instead.
+        """
         if self.nw is None:
             self.build_network()
         assert self.nw is not None
@@ -556,34 +613,24 @@ class CompleteBoilerTurbineModel:
             self.nw.set_attr(max_iter=max_iter)
 
         print("\n开始求解...")
-        print("警告: 由于模型复杂性，求解可能需要较长时间...")
+        print("Note: Solving from validated inputs without init_path dependency...")
 
-        solver_desc = "默认初始值"
+        solver_desc = "CSV-derived initial values + validated boundary conditions"
         try:
-            if use_reference_init:
-                solver_desc = "参考初始化路径"
-                self.nw.solve(mode="design", init_path=str(self.reference_path))
-            else:
-                self.nw.solve(mode="design")
+            self.nw.solve(mode="design")
         except Exception as exc:
-            print(f"✗ 求解失败（{solver_desc}）: {exc}")
-            if not use_reference_init and allow_fallback:
-                print("→ 尝试使用参考初始化路径重新求解 ...")
-                try:
-                    solver_desc = "参考初始化路径（回退）"
-                    self.nw.solve(mode="design", init_path=str(self.reference_path))
-                except Exception as fallback_exc:
-                    print(f"✗ 使用参考路径依然失败: {fallback_exc}")
-                    import traceback
-                    traceback.print_exc()
-                    return False
-            else:
-                import traceback
-                traceback.print_exc()
-                return False
+            print(f"✗ 求解失败: {exc}")
+            print("\nTroubleshooting:")
+            print("  - Check boundary conditions in _set_boundary_conditions()")
+            print("  - Verify that all system inlets have proper constraints")
+            print("  - Ensure no circular pressure dependencies remain")
+            import traceback
+            traceback.print_exc()
+            return False
 
         if not self.nw.converged:
             print("✗ 未收敛")
+            print("  Consider adjusting max_iter or reviewing boundary conditions")
             return False
 
         # 收集求解信息
