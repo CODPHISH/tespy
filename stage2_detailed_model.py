@@ -44,13 +44,15 @@ class CompleteBoilerTurbineModel:
         self.components: dict = {}
         self.connections: dict = {}
         self.results: dict = {}
+        self.convergence_info: dict = {}
+        self.reference_path = PROJECT_ROOT / "boiler-turbine_design_state"
         
         # 读取CSV数据
         self.load_csv_data()
 
     def load_csv_data(self) -> None:
         """从CSV文件加载组件和连接数据"""
-        base_path = PROJECT_ROOT / "boiler-turbine_design_state"
+        base_path = self.reference_path
         
         # 读取连接数据
         self.conn_df = pd.read_csv(base_path / "connections.csv", sep=';')
@@ -511,11 +513,12 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
         
-        # 高压缸排汽抽汽：固定流量
+        # 高压缸排汽抽汽：固定流量（从CSV看是20 t/h）
         try:
             conn = nw.get_conn("抽凝式汽轮机1_高压缸排汽抽汽")
             data = conn_data.get("抽凝式汽轮机1_高压缸排汽抽汽", {})
-            conn.set_attr(m=data['m'])
+            if pd.notna(data['m']) and data['m'] > 0:
+                conn.set_attr(m=data['m'])
         except KeyError:
             pass
         
@@ -537,28 +540,65 @@ class CompleteBoilerTurbineModel:
         
         print("   ✓ 边界条件设置完成（使用初始值策略避免过度约束）")
 
-    def solve(self) -> bool:
-        """求解网络"""
+    def solve(
+        self,
+        *,
+        use_reference_init: bool = False,
+        allow_fallback: bool = True,
+        max_iter: int | None = 200,
+    ) -> bool:
+        """求解网络（默认使用CSV初始值而非导出的状态文件）"""
         if self.nw is None:
             self.build_network()
         assert self.nw is not None
-        
+
+        if max_iter is not None:
+            self.nw.set_attr(max_iter=max_iter)
+
         print("\n开始求解...")
-        print("警告: 由于模型复杂性，初次求解可能需要较长时间...")
-        
+        print("警告: 由于模型复杂性，求解可能需要较长时间...")
+
+        solver_desc = "default initial values"
         try:
-            # 尝试从CSV文件初始化
-            self.nw.solve(mode="design", init_path="boiler-turbine_design_state")
+            if use_reference_init:
+                solver_desc = "reference init state"
+                self.nw.solve(mode="design", init_path=str(self.reference_path))
+            else:
+                self.nw.solve(mode="design")
         except Exception as exc:
-            print(f"✗ 求解失败: {exc}")
-            import traceback
-            traceback.print_exc()
-            return False
-            
+            print(f"✗ 求解失败 ({solver_desc}): {exc}")
+            if not use_reference_init and allow_fallback:
+                print("→ 尝试使用参考初始化路径重新求解 ...")
+                try:
+                    solver_desc = "reference init state (fallback)"
+                    self.nw.solve(mode="design", init_path=str(self.reference_path))
+                except Exception as fallback_exc:
+                    print(f"✗ 使用参考路径依然失败: {fallback_exc}")
+                    import traceback
+                    traceback.print_exc()
+                    return False
+            else:
+                import traceback
+                traceback.print_exc()
+                return False
+
         if not self.nw.converged:
             print("✗ 未收敛")
             return False
-            
+
+        # 收集求解信息
+        self.convergence_info = {
+            "converged": self.nw.converged,
+            "iterations": getattr(self.nw, "iter", None),
+            "max_iter": getattr(self.nw, "max_iter", None),
+            "solver_strategy": solver_desc,
+        }
+        if hasattr(self.nw, "vec_res") and self.nw.vec_res is not None:
+            try:
+                self.convergence_info["residual"] = float(self.nw.vec_res.max())
+            except Exception:
+                pass
+
         print("✓ 求解成功\n")
         return True
 
