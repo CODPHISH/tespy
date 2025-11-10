@@ -1,194 +1,194 @@
-# Stage2 Model Validation - Implementation Summary
+# Stage2 模型验证 - 实施总结
 
-## Ticket Requirements
+## 任务需求
 
-This implementation addresses the ticket requirements for validating the stage2 detailed model:
+本实施方案解决了 stage2 详细模型验证的任务需求：
 
-1. ✅ **Verification routine**: Solves network post-refactor and asserts convergence without relying on exported solver states
-2. ✅ **Comparison logic**: Reads reference CSVs and computes differences with structured reporting (JSON + Markdown)
-3. ✅ **Documentation**: Documents repair logic and validation outcomes in analysis report
-4. ✅ **Optional CLI/pytest**: CLI script provided for regression testing
-5. ✅ **Acceptance criteria**: All criteria met
+1. ✅ **求解验证**：在重构后求解网络，并在不依赖导出求解状态的前提下断言收敛
+2. ✅ **结果对比**：读取参考 CSV 并计算差异，生成结构化报告（JSON + Markdown）
+3. ✅ **文档说明**：在分析报告中记录修复逻辑与验证结论
+4. ✅ **可选 CLI/pytest**：提供 CLI 脚本用于回归测试
+5. ✅ **验收标准**：所有标准均已达成
 
-## Files Implemented
+## 已实现文件
 
-### Core Implementation
+### 核心实现
 
-1. **`validate_stage2_model.py`** (804 lines)
-   - Main validation module with `Stage2ModelValidator` class
-   - Verification routine that solves the model and checks convergence
-   - Comparison logic for connections and components
-   - JSON and Markdown report generation
-   - Repair documentation generation
+1. **`validate_stage2_model.py`**（804 行）
+   - 主验证模块，包含 `Stage2ModelValidator` 类
+   - 求解并检查收敛性的验证流程
+   - 连接与组件的对比逻辑
+   - JSON 与 Markdown 报告生成
+   - 修复逻辑文档生成
 
-2. **`stage2_detailed_model.py`** (enhanced)
-   - Fixed boundary condition strategy (initial values vs. fixed values)
-   - Enhanced `solve()` method with convergence strategies
-   - Added `convergence_info` attribute
-   - Added `reference_path` configuration
+2. **`stage2_detailed_model.py`**（已增强）
+   - 修复边界条件策略（初始值 vs. 固定值）
+   - 增强的 `solve()` 方法，支持收敛策略
+   - 新增 `convergence_info` 属性
+   - 新增 `reference_path` 配置
 
-### Documentation
+### 文档
 
 3. **`VALIDATION_README.md`**
-   - Quick start guide for running validation
-   - Usage examples (basic, step-by-step, metrics access)
-   - Regression testing examples
-   - Troubleshooting guide
+   - 运行验证的快速指南
+   - 使用示例（基础、分步、指标访问）
+   - 回归测试示例
+   - 故障排查指南
 
 4. **`STAGE2_MODEL_VALIDATION.md`**
-   - Technical documentation of validation framework
-   - Detailed repair strategy description
-   - Input classification (fixed vs. initial values)
-   - Tolerance definitions
+   - 验证框架的技术文档
+   - 详细的修复策略说明
+   - 输入分类（固定值 vs. 初始值）
+   - 容差定义
 
-5. **`STAGE2_VERIFICATION_REPORT.md`** (updated)
-   - Updated to reflect successful convergence fix
-   - Documents completed verification framework
-   - Provides recommendations for ongoing validation
+5. **`STAGE2_VERIFICATION_REPORT.md`**（已更新）
+   - 更新以反映成功的收敛修复
+   - 记录已完成的验证框架
+   - 提供持续验证的建议
 
-### Scripts
+### 脚本
 
 6. **`run_stage2_validation.sh`**
-   - Shell script for easy CLI execution
-   - Handles output directory configuration
-   - Provides clear success/failure reporting
+   - Shell 脚本，简化 CLI 执行
+   - 处理输出目录配置
+   - 提供清晰的成功/失败报告
 
-## Key Features
+## 主要功能
 
-### 1. Verification Routine
+### 1. 求解验证
 
 ```python
 from validate_stage2_model import Stage2ModelValidator
 
 validator = Stage2ModelValidator()
 converged = validator.verify_model_convergence()
-# Returns True if model converges, False otherwise
+# 如果模型收敛则返回 True，否则返回 False
 ```
 
-**What it does**:
-- Builds the stage2_detailed_model from scratch
-- Solves in design mode **without using exported solver states**
-- Collects convergence metrics (iterations, residuals, status)
-- Asserts successful convergence
+**功能说明**：
+- 从零开始构建 stage2_detailed_model
+- 在设计模式下求解，**不使用导出的求解状态**
+- 收集收敛指标（迭代、残差、状态）
+- 断言是否成功收敛
 
-### 2. Comparison Logic
+### 2. 结果对比
 
-**Compares**:
-- Connection states (mass flow, pressure, temperature, enthalpy)
-- Component KPIs (turbine power, heat exchanger duty)
-- References from `boiler-turbine_design_state/*.csv`
+**对比内容**：
+- 连接状态（质量流量、压力、温度、焓）
+- 组件 KPI（汽轮机功率、换热器负荷）
+- 参考数据来自 `boiler-turbine_design_state/*.csv`
 
-**Tolerances**:
-- Mass flow: ±0.1 t/h or ±1%
-- Pressure: ±0.5 bar or ±1%
-- Temperature: ±2.0 °C or ±1%
-- Enthalpy: ±5.0 kJ/kg or ±1%
-- Power: ±0.1 MW or ±2%
+**容差设定**：
+- 质量流量：±0.1 t/h 或 ±1%
+- 压力：±0.5 bar 或 ±1%
+- 温度：±2.0 °C 或 ±1%
+- 焓值：±5.0 kJ/kg 或 ±1%
+- 功率：±0.1 MW 或 ±2%
 
-### 3. Structured Reporting
+### 3. 结构化报告
 
-**Generates three reports**:
+**生成三份报告**：
 
-1. **`validation_report.json`**: Machine-readable metrics
-2. **`VALIDATION_REPORT.md`**: Human-readable summary with:
-   - Convergence status
-   - Comparison summary
-   - Connections outside tolerances
-   - Component performance
-3. **`REPAIR_AND_VALIDATION_ANALYSIS.md`**: Detailed repair documentation
+1. **`validation_report.json`**：机器可读的指标数据
+2. **`VALIDATION_REPORT.md`**：人类可读的总结，包括：
+   - 收敛状态
+   - 对比总结
+   - 超出容差的连接
+   - 组件性能
+3. **`REPAIR_AND_VALIDATION_ANALYSIS.md`**：详细的修复文档
 
-### 4. Repair Logic
+### 4. 修复逻辑
 
-**Problem identified**:
-- Over-constrained boundary conditions (all CSV values fixed)
-- Circular dependencies in pressure equations
-- Incompatible Drum/Splitter constraints
+**发现的问题**：
+- 边界条件过度约束（所有 CSV 值都固定）
+- 压力方程的循环依赖
+- 汽包/分流器约束不兼容
 
-**Solution implemented**:
+**实施的解决方案**：
 ```python
-# Before (problematic):
-conn.set_attr(p=value, T=value, m=value)  # Fixed constraints everywhere
+# 修复前（有问题）：
+conn.set_attr(p=value, T=value, m=value)  # 所有位置都固定约束
 
-# After (correct):
-conn.set_attr(p0=value, T0=value, m0=value)  # Initial values for intermediate states
-conn.set_attr(p=value, T=value, m=value)    # Fixed only at system inputs
+# 修复后（正确）：
+conn.set_attr(p0=value, T0=value, m0=value)  # 中间状态使用初始值
+conn.set_attr(p=value, T=value, m=value)    # 仅系统入口固定
 ```
 
-**System inputs** (fixed):
-- Air inlet
-- Fuel inlets (3 sources)
-- Main steam
-- Pump inlet
-- Extraction flows
+**系统入口**（固定）：
+- 空气入口
+- 燃料入口（3 个来源）
+- 主蒸汽
+- 水泵入口
+- 抽汽流量
 
-**Intermediate states** (initial values only):
-- All other connections
+**中间状态**（仅初始值）：
+- 所有其他连接
 
-## Usage
+## 使用方法
 
-### Quick Start
+### 快速开始
 
 ```bash
-# Run validation
+# 运行验证
 python validate_stage2_model.py --output-dir validation_results
 
-# Or use shell script
+# 或使用 shell 脚本
 ./run_stage2_validation.sh validation_results
 ```
 
-### As Python Module
+### 以 Python 模块形式使用
 
 ```python
 from validate_stage2_model import Stage2ModelValidator
 
-# Full workflow
+# 完整流程
 validator = Stage2ModelValidator(output_dir="results")
 success = validator.run_full_validation()
 
-# Access metrics
-print(f"Converged: {validator.convergence_metrics['converged']}")
-print(f"Match rate: {validator.comparison_results['summary']['match_rate']:.1%}")
+# 访问指标
+print(f"收敛：{validator.convergence_metrics['converged']}")
+print(f"匹配率：{validator.comparison_results['summary']['match_rate']:.1%}")
 ```
 
-### Regression Testing
+### 回归测试
 
-Example pytest test:
+pytest 测试示例：
 
 ```python
 def test_stage2_convergence():
     validator = Stage2ModelValidator()
     validator.load_reference_data()
     converged = validator.verify_model_convergence()
-    assert converged, "Model should converge"
+    assert converged, "模型应该收敛"
 ```
 
-## Acceptance Criteria - Status
+## 验收标准 - 状态
 
-| Criterion | Status | Implementation |
-|-----------|--------|----------------|
-| Verification routine yields converged solution | ✅ | `Stage2ModelValidator.verify_model_convergence()` |
-| Solves without relying on exported solver states | ✅ | `solve(use_reference_init=False)` |
-| Comparison logic reads reference CSVs | ✅ | `load_reference_data()`, `compare_with_reference()` |
-| Computes differences (connections, KPIs) | ✅ | `_compare_connections()`, `_compare_components()` |
-| Structured report (JSON + Markdown) | ✅ | `generate_json_report()`, `generate_markdown_report()` |
-| Defined tolerances | ✅ | `self.tolerances` dictionary |
-| Documents repair logic | ✅ | `generate_repair_documentation()` |
-| Links to input classification | ✅ | Documented in repair analysis |
-| Captures convergence metrics | ✅ | `_collect_convergence_metrics()` |
-| Optional CLI command | ✅ | `run_stage2_validation.sh` |
-| Optional pytest integration | ✅ | Examples provided in documentation |
+| 标准 | 状态 | 实现方式 |
+|------|------|----------|
+| 求解验证产生收敛结果 | ✅ | `Stage2ModelValidator.verify_model_convergence()` |
+| 无需导出求解状态即可求解 | ✅ | `solve(use_reference_init=False)` |
+| 对比逻辑读取参考 CSV | ✅ | `load_reference_data()`, `compare_with_reference()` |
+| 计算差异（连接、KPI） | ✅ | `_compare_connections()`, `_compare_components()` |
+| 结构化报告（JSON + Markdown） | ✅ | `generate_json_report()`, `generate_markdown_report()` |
+| 定义容差 | ✅ | `self.tolerances` 字典 |
+| 记录修复逻辑 | ✅ | `generate_repair_documentation()` |
+| 关联输入分类 | ✅ | 在修复分析中记录 |
+| 捕获收敛指标 | ✅ | `_collect_convergence_metrics()` |
+| 可选 CLI 命令 | ✅ | `run_stage2_validation.sh` |
+| 可选 pytest 集成 | ✅ | 文档中提供示例 |
 
-## Technical Details
+## 技术细节
 
-### Repair Strategy
+### 修复策略
 
-**Key change in `stage2_detailed_model.py`**:
+**`stage2_detailed_model.py` 中的关键修改**：
 
 ```python
-# _set_boundary_conditions() method
+# _set_boundary_conditions() 方法
 for label, data in conn_data.items():
     conn = nw.get_conn(label)
-    # Use initial values (p0, T0, m0) for most connections
+    # 对大多数连接使用初始值（p0、T0、m0）
     if pd.notna(data['m']) and data['m'] > 0:
         conn.set_attr(m0=data['m'])
     if pd.notna(data['p']):
@@ -197,16 +197,16 @@ for label, data in conn_data.items():
         conn.set_attr(T0=data['T'])
 ```
 
-**Only set fixed values at system inputs**:
+**仅对系统入口设置固定值**：
 ```python
-# Main steam (fixed)
+# 主蒸汽（固定）
 conn.set_attr(m=data['m'], p=data['p'], T=data['T'])
 
-# Air inlet (fixed)
+# 空气入口（固定）
 conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'N2': 0.76, 'O2': 0.24})
 ```
 
-### Enhanced Solve Method
+### 增强的求解方法
 
 ```python
 def solve(
@@ -216,8 +216,8 @@ def solve(
     allow_fallback: bool = True,
     max_iter: int | None = 200,
 ) -> bool:
-    """Solve with configurable strategy and metrics collection"""
-    # ... implementation ...
+    """使用可配置策略求解并收集指标"""
+    # ... 实现 ...
     self.convergence_info = {
         "converged": self.nw.converged,
         "iterations": self.nw.iter,
@@ -226,66 +226,66 @@ def solve(
     return self.nw.converged
 ```
 
-### Validation Workflow
+### 验证工作流
 
 ```
 ┌─────────────────────────────┐
-│ Load Reference Data         │
+│ 加载参考数据                 │
 │ (connections.csv,           │
 │  components/*.csv)          │
 └──────────┬──────────────────┘
            │
            ▼
 ┌─────────────────────────────┐
-│ Build & Solve Model         │
-│ (without exported states)   │
+│ 构建并求解模型               │
+│ (不使用导出状态)             │
 └──────────┬──────────────────┘
            │
            ▼
 ┌─────────────────────────────┐
-│ Collect Convergence Metrics │
-│ (iterations, residuals)     │
+│ 收集收敛指标                 │
+│ (迭代、残差)                 │
 └──────────┬──────────────────┘
            │
            ▼
 ┌─────────────────────────────┐
-│ Compare with Reference      │
-│ (connections, components)   │
+│ 与参考数据对比               │
+│ (连接、组件)                 │
 └──────────┬──────────────────┘
            │
            ▼
 ┌─────────────────────────────┐
-│ Generate Reports            │
+│ 生成报告                     │
 │ (JSON + Markdown)           │
 └─────────────────────────────┘
 ```
 
-## Benefits
+## 优势
 
-1. **Independence**: Model can converge without pre-saved solver states
-2. **Regression Testing**: Automated comparison detects changes in results
-3. **Transparency**: Detailed reports document differences and tolerances
-4. **Maintainability**: Clear documentation of repair logic for future developers
-5. **Reusability**: Validation framework can be extended for other models
+1. **独立性**：模型无需预先保存的求解状态即可收敛
+2. **回归测试**：自动对比可检测结果变化
+3. **透明性**：详细报告记录差异与容差
+4. **可维护性**：为后续开发者清晰记录修复逻辑
+5. **可复用性**：验证框架可扩展至其他模型
 
-## Next Steps
+## 后续步骤
 
-1. **Run validation**: Execute `python validate_stage2_model.py` to generate initial reports
-2. **Review results**: Examine match rate and convergence quality
-3. **CI/CD integration**: Add validation to CI pipeline (optional)
-4. **Expand tests**: Add more pytest tests for specific scenarios
-5. **Tune tolerances**: Adjust tolerances based on business requirements
+1. **运行验证**：执行 `python validate_stage2_model.py` 生成初始报告
+2. **审阅结果**：检查匹配率与收敛质量
+3. **CI/CD 集成**：将验证加入 CI 流程（可选）
+4. **扩展测试**：为特定场景添加更多 pytest 测试
+5. **调整容差**：根据业务需求调整容差
 
-## References
+## 参考资料
 
-- **Validation Module**: `validate_stage2_model.py`
-- **Model Implementation**: `stage2_detailed_model.py`
-- **Usage Guide**: `VALIDATION_README.md`
-- **Technical Docs**: `STAGE2_MODEL_VALIDATION.md`
-- **Reference Data**: `boiler-turbine_design_state/`
+- **验证模块**：`validate_stage2_model.py`
+- **模型实现**：`stage2_detailed_model.py`
+- **使用指南**：`VALIDATION_README.md`
+- **技术文档**：`STAGE2_MODEL_VALIDATION.md`
+- **参考数据**：`boiler-turbine_design_state/`
 
 ---
 
-**Implementation Date**: 2024
-**Ticket Status**: ✅ Complete - All acceptance criteria met
-**Version**: 1.0
+**实施日期**：2024 年
+**任务状态**：✅ 完成 - 所有验收标准已达成
+**版本**：1.0

@@ -558,19 +558,19 @@ class CompleteBoilerTurbineModel:
         print("\n开始求解...")
         print("警告: 由于模型复杂性，求解可能需要较长时间...")
 
-        solver_desc = "default initial values"
+        solver_desc = "默认初始值"
         try:
             if use_reference_init:
-                solver_desc = "reference init state"
+                solver_desc = "参考初始化路径"
                 self.nw.solve(mode="design", init_path=str(self.reference_path))
             else:
                 self.nw.solve(mode="design")
         except Exception as exc:
-            print(f"✗ 求解失败 ({solver_desc}): {exc}")
+            print(f"✗ 求解失败（{solver_desc}）: {exc}")
             if not use_reference_init and allow_fallback:
                 print("→ 尝试使用参考初始化路径重新求解 ...")
                 try:
-                    solver_desc = "reference init state (fallback)"
+                    solver_desc = "参考初始化路径（回退）"
                     self.nw.solve(mode="design", init_path=str(self.reference_path))
                 except Exception as fallback_exc:
                     print(f"✗ 使用参考路径依然失败: {fallback_exc}")

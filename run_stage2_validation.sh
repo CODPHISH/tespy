@@ -1,31 +1,31 @@
 #!/bin/bash
-# Simple script to run stage2 model validation
+# Stage2 模型验证脚本
 #
-# Usage:
+# 用法：
 #   ./run_stage2_validation.sh [output_dir]
 #
-# If output_dir is not specified, defaults to 'validation_results'
+# 如果未指定 output_dir，默认为 'validation_results'
 
 set -e
 
 OUTPUT_DIR="${1:-validation_results}"
 
 echo "=================================================="
-echo "Stage2 Model Validation"
+echo "Stage2 模型验证"
 echo "=================================================="
-echo "Output directory: $OUTPUT_DIR"
+echo "输出目录：$OUTPUT_DIR"
 echo ""
 
-# Run validation
+# 运行验证
 python3 validate_stage2_model.py --output-dir "$OUTPUT_DIR"
 
-# Check exit code
+# 检查退出码
 if [ $? -eq 0 ]; then
     echo ""
     echo "=================================================="
-    echo "✓ Validation Complete"
+    echo "✓ 验证完成"
     echo "=================================================="
-    echo "Reports generated in: $OUTPUT_DIR/"
+    echo "报告已生成到：$OUTPUT_DIR/"
     echo "  - validation_report.json"
     echo "  - VALIDATION_REPORT.md"
     echo "  - REPAIR_AND_VALIDATION_ANALYSIS.md"
@@ -33,7 +33,7 @@ if [ $? -eq 0 ]; then
 else
     echo ""
     echo "=================================================="
-    echo "✗ Validation Failed"
+    echo "✗ 验证失败"
     echo "=================================================="
     exit 1
 fi

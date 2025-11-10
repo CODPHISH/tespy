@@ -1,262 +1,262 @@
-# Stage2 Model Validation Framework
+# Stage2 模型验证框架
 
-## Quick Start
+## 快速开始
 
-### Run Validation
+### 运行验证
 
 ```bash
-# Option 1: Using Python directly
+# 方式 1：直接使用 Python
 python validate_stage2_model.py --output-dir validation_results
 
-# Option 2: Using shell script
+# 方式 2：使用 shell 脚本
 ./run_stage2_validation.sh validation_results
 ```
 
-### View Results
+### 查看结果
 
-After validation completes, check the output directory for three reports:
+验证完成后，在输出目录中可查看三份报告：
 
-1. **validation_report.json** - Machine-readable metrics
-2. **VALIDATION_REPORT.md** - Summary with comparison results
-3. **REPAIR_AND_VALIDATION_ANALYSIS.md** - Detailed repair logic analysis
+1. **validation_report.json** - 机器可读的指标数据
+2. **VALIDATION_REPORT.md** - 带有对比结果的概要
+3. **REPAIR_AND_VALIDATION_ANALYSIS.md** - 详尽的修复逻辑分析
 
-## What This Framework Does
+## 本框架的功能
 
-### 1. Verification Routine
+### 1. 求解验证
 
-**Solves the stage2_detailed_model post-refactor** and verifies convergence **without relying on exported solver states**. This ensures the model can be solved independently with only boundary conditions.
+**在重构后求解 stage2_detailed_model**，验证收敛性，且**不依赖导出的求解状态**。这样保证了模型仅凭边界条件即可独立求解。
 
-Key features:
-- ✅ Builds network from scratch
-- ✅ Solves in design mode with enhanced boundary condition strategy
-- ✅ Collects convergence metrics (iterations, residuals, status)
-- ✅ Does not require pre-saved solver state files
+主要特点：
+- ✅ 从零开始构建网络
+- ✅ 以设计模式求解，应用优化后的边界条件策略
+- ✅ 收集收敛指标（迭代次数、残差、状态）
+- ✅ 无需预保存的求解器状态文件
 
-### 2. Comparison Logic
+### 2. 结果对比
 
-**Reads reference CSVs** from `boiler-turbine_design_state/` and **computes differences** between:
-- Current simulation connection states (m, p, T, h)
-- Reference data from converged baseline
-- Component KPIs (turbine power, heat exchanger duty)
+**读取 `boiler-turbine_design_state/` 中的参考 CSV 文件**，**对比差异**：
+- 当前仿真的连接状态（m、p、T、h）
+- 已收敛的基准数据
+- 组件关键性能指标（汽轮机功率、换热器热负荷）
 
-Comparison uses **defined tolerances**:
-- Mass flow: ±0.1 t/h or ±1%
-- Pressure: ±0.5 bar or ±1%
-- Temperature: ±2.0 °C or ±1%
-- Enthalpy: ±5.0 kJ/kg or ±1%
-- Power: ±0.1 MW or ±2%
+对比使用**预设容差**：
+- 质量流量：±0.1 t/h 或 ±1%
+- 压力：±0.5 bar 或 ±1%
+- 温度：±2.0 °C 或 ±1%
+- 焓值：±5.0 kJ/kg 或 ±1%
+- 功率：±0.1 MW 或 ±2%
 
-### 3. Structured Reporting
+### 3. 结构化报告
 
-**Generates comparison artifacts** with:
-- Match rate statistics
-- Detailed connection-by-connection differences  
-- Component performance comparison
-- Missing connection identification
-- Tolerance compliance assessment
+**生成对比报告**，包含：
+- 匹配率统计
+- 逐条连接的详细差异  
+- 组件性能对比
+- 缺失连接识别
+- 容差达标评估
 
-### 4. Documentation
+### 4. 文档说明
 
-**Documents repair logic and validation outcomes** in analysis report:
-- Problem identification (over-constrained boundaries)
-- Repair strategy (initial values vs. fixed values)
-- Input classification (system inputs vs. intermediate states)
-- Validation outcomes (convergence metrics, comparison results)
-- Recommendations for future development
+**在分析报告中说明修复逻辑与验证结果**：
+- 问题识别（边界条件过度约束）
+- 修复策略（初始值 vs. 固定值）
+- 输入分类（系统入口 vs. 中间状态）
+- 验证结论（收敛指标、对比结果）
+- 后续开发建议
 
-## Key Model Repairs
+## 关键模型修复
 
-The validation framework works in conjunction with repairs made to `stage2_detailed_model.py`:
+验证框架与 `stage2_detailed_model.py` 的修复相配合：
 
-### Problem
+### 问题
 
-Original model had:
-- All CSV connection states set as fixed constraints → over-determined problem
-- Circular dependencies between component pr equations and fixed pressures
-- Incompatible Drum/Splitter constraints
+原模型存在：
+- 所有 CSV 中的连接状态都作为固定约束 → 问题过度约束
+- 组件 pr 方程与固定压力的循环依赖
+- 汽包/分流器约束不兼容
 
-### Solution
+### 解决方案
 
-**Boundary Condition Strategy**:
-- Use `p0`, `T0`, `m0` (initial values) for intermediate connections
-- Use `p`, `T`, `m` (fixed values) only for true system inputs:
-  - Air inlet
-  - Fuel inlets (3 sources)
-  - Main steam
-  - Pump inlet
-  - Extraction flows
+**边界条件策略**：
+- 对中间连接使用 `p0`、`T0`、`m0`（初始值）
+- 仅对真实系统输入使用 `p`、`T`、`m`（固定值）：
+  - 空气入口
+  - 燃料入口（3 个来源）
+  - 主蒸汽
+  - 水泵入口
+  - 抽汽流量
 
-**Enhanced Solver**:
+**增强的求解器**：
 ```python
 model.solve(
-    use_reference_init=False,  # Don't rely on exported state
-    allow_fallback=True,        # Fallback to reference init if needed
-    max_iter=200                # Iteration limit
+    use_reference_init=False,  # 不依赖导出状态
+    allow_fallback=True,        # 如需要，可回退到参考初始化
+    max_iter=200                # 迭代上限
 )
 ```
 
-## Usage Examples
+## 使用示例
 
-### Basic Validation
+### 基础验证
 
 ```python
 from validate_stage2_model import Stage2ModelValidator
 
-# Create validator
+# 创建验证器
 validator = Stage2ModelValidator(output_dir="validation_results")
 
-# Run full workflow
+# 运行完整流程
 success = validator.run_full_validation()
 ```
 
-### Step-by-Step Validation
+### 分步执行验证
 
 ```python
 validator = Stage2ModelValidator()
 
-# Step 1: Load reference data
+# 步骤 1：加载参考数据
 validator.load_reference_data()
 
-# Step 2: Verify convergence
+# 步骤 2：验证收敛性
 converged = validator.verify_model_convergence()
 if not converged:
-    print("Model failed to converge")
+    print("模型未能收敛")
     exit(1)
 
-# Step 3: Compare with reference
+# 步骤 3：与参考数据对比
 results = validator.compare_with_reference()
-print(f"Match rate: {results['summary']['match_rate']:.1%}")
+print(f"匹配率：{results['summary']['match_rate']:.1%}")
 
-# Step 4: Generate reports
+# 步骤 4：生成报告
 validator.generate_json_report()
 validator.generate_markdown_report()
 validator.generate_repair_documentation()
 ```
 
-### Accessing Metrics
+### 访问指标
 
 ```python
 validator = Stage2ModelValidator()
 validator.run_full_validation()
 
-# Convergence metrics
-print(f"Iterations: {validator.convergence_metrics['num_iterations']}")
-print(f"Converged: {validator.convergence_metrics['converged']}")
+# 收敛指标
+print(f"迭代次数：{validator.convergence_metrics['num_iterations']}")
+print(f"是否收敛：{validator.convergence_metrics['converged']}")
 
-# Comparison metrics
+# 对比指标
 summary = validator.comparison_results['summary']
-print(f"Total connections: {summary['total_connections']}")
-print(f"Match rate: {summary['match_rate']:.1%}")
+print(f"总连接数：{summary['total_connections']}")
+print(f"匹配率：{summary['match_rate']:.1%}")
 ```
 
-## Regression Testing
+## 回归测试
 
-### Optional Pytest Integration
+### 可选的 Pytest 集成
 
-While the validation can be run standalone, it can also be integrated into pytest for regression testing:
+虽然验证可单独运行，也可集成至 pytest 进行回归测试：
 
 ```python
 import pytest
 from validate_stage2_model import Stage2ModelValidator
 
 def test_stage2_convergence():
-    """Test that stage2 model converges"""
+    """测试 stage2 模型能否收敛"""
     validator = Stage2ModelValidator()
     validator.load_reference_data()
     converged = validator.verify_model_convergence()
-    assert converged, "Model should converge"
+    assert converged, "模型应该收敛"
 
 def test_stage2_match_rate():
-    """Test that comparison match rate is acceptable"""
+    """测试对比匹配率是否达标"""
     validator = Stage2ModelValidator()
     validator.run_full_validation()
     match_rate = validator.comparison_results['summary']['match_rate']
-    assert match_rate >= 0.80, f"Match rate {match_rate:.1%} below 80%"
+    assert match_rate >= 0.80, f"匹配率 {match_rate:.1%} 低于 80%"
 ```
 
-Run with:
+运行命令：
 ```bash
 pytest -v test_stage2_validation.py
 ```
 
-## Acceptance Criteria
+## 验收标准
 
-| Criterion | Status | Description |
-|-----------|--------|-------------|
-| Verification routine yields converged solution | ✅ | Model solves without exported solver states |
-| Comparison artifact with tolerances | ✅ | JSON + Markdown reports with defined tolerances |
-| Documentation of repair logic | ✅ | REPAIR_AND_VALIDATION_ANALYSIS.md documents strategy |
-| Convergence metrics | ✅ | Iterations, residuals, status captured and reported |
-| Optional pytest/CLI command | ✅ | CLI script and pytest examples provided |
+| 标准 | 状态 | 说明 |
+|------|------|------|
+| 求解验证产生收敛结果 | ✅ | 模型无需导出求解状态也能求解 |
+| 带容差的对比报告 | ✅ | 生成 JSON + Markdown 报告并设定容差 |
+| 修复逻辑文档 | ✅ | REPAIR_AND_VALIDATION_ANALYSIS.md 记录策略 |
+| 收敛指标 | ✅ | 收集并输出迭代、残差、状态 |
+| 可选 pytest/CLI 命令 | ✅ | 提供 CLI 脚本与 pytest 示例 |
 
-## Files
+## 文件清单
 
-| File | Purpose |
-|------|---------|
-| `validate_stage2_model.py` | Main validation module |
-| `stage2_detailed_model.py` | Enhanced model with repair logic |
-| `run_stage2_validation.sh` | Shell script for easy execution |
-| `STAGE2_MODEL_VALIDATION.md` | Technical documentation |
-| `VALIDATION_README.md` | This file - usage guide |
+| 文件 | 作用 |
+|------|------|
+| `validate_stage2_model.py` | 主验证模块 |
+| `stage2_detailed_model.py` | 已包含修复逻辑的增强模型 |
+| `run_stage2_validation.sh` | Shell 脚本，简化执行 |
+| `STAGE2_MODEL_VALIDATION.md` | 技术文档 |
+| `VALIDATION_README.md` | 本文件 - 使用指南 |
 
-## Output Structure
+## 输出结构
 
 ```
 validation_results/
-├── validation_report.json              # Machine-readable metrics
-├── VALIDATION_REPORT.md               # Human-readable summary
-└── REPAIR_AND_VALIDATION_ANALYSIS.md  # Detailed repair analysis
+├── validation_report.json              # 机器可读的指标数据
+├── VALIDATION_REPORT.md               # 人类可读的概要
+└── REPAIR_AND_VALIDATION_ANALYSIS.md  # 详细的修复分析
 ```
 
-## Troubleshooting
+## 故障排查
 
-### Model Not Converging
+### 模型未收敛
 
-If the model fails to converge:
+如果模型无法收敛：
 
-1. **Check boundary conditions**: Ensure only true system inputs are fixed
-2. **Review convergence metrics**: Check iteration count and residuals
-3. **Enable fallback**: Try `use_reference_init=True, allow_fallback=True`
-4. **Increase iterations**: Try `max_iter=300` or higher
+1. **检查边界条件**：确保只对真正的系统入口设置固定值
+2. **查看收敛指标**：检查迭代次数和残差
+3. **启用回退**：尝试 `use_reference_init=True, allow_fallback=True`
+4. **增加迭代数**：尝试 `max_iter=300` 或更高
 
-### Large Differences vs Reference
+### 与参考数据差异较大
 
-If comparison shows large differences:
+如果对比显示较大差异：
 
-1. **Check tolerances**: Verify tolerances are appropriate for your use case
-2. **Review solver settings**: Different solver settings can produce slightly different results
-3. **Inspect specific connections**: Look at VALIDATION_REPORT.md for detailed differences
-4. **Verify input data**: Ensure reference CSV data is correct
+1. **检查容差设置**：根据实际需求调整容差
+2. **审视求解设置**：不同的求解器设置可能产生略有不同的结果
+3. **查看具体连接**：在 VALIDATION_REPORT.md 中查看详细差异
+4. **核对输入数据**：确保参考 CSV 数据正确
 
-### Missing Connections
+### 报告缺失连接
 
-If comparison reports missing connections:
+如果对比报告指出缺失连接：
 
-1. **Check connection labels**: Ensure labels in model match CSV exactly
-2. **Review model structure**: Verify all connections from CSV are implemented
-3. **Check CSV integrity**: Ensure reference CSV is complete and readable
+1. **检查连接标签**：确保模型中的标签与 CSV 完全一致
+2. **检查模型结构**：验证 CSV 中的所有连接已正确实现
+3. **检查 CSV 完整性**：确保参考 CSV 完整且可读
 
-## Contributing
+## 贡献指南
 
-When modifying the model or validation:
+修改模型或验证时应注意：
 
-1. **Preserve boundary condition strategy**: Keep fixed vs. initial value distinction
-2. **Update tolerances if needed**: Adjust in `Stage2ModelValidator.__init__()`
-3. **Document changes**: Update STAGE2_MODEL_VALIDATION.md
-4. **Run validation**: Verify changes don't break convergence
-5. **Review reports**: Check that match rate remains acceptable
+1. **保留边界条件策略**：维持固定值 vs. 初始值的区分
+2. **按需更新容差**：在 `Stage2ModelValidator.__init__()` 中调整
+3. **更新文档**：修改 STAGE2_MODEL_VALIDATION.md
+4. **运行验证**：确保修改不影响收敛性
+5. **审核报告**：检查匹配率是否维持在合理水平
 
-## References
+## 参考资料
 
-- **Model Implementation**: `stage2_detailed_model.py`
-- **Previous Reports**: 
+- **模型实现**：`stage2_detailed_model.py`
+- **历史报告**：
   - `STAGE2_VERIFICATION_REPORT.md`
   - `VERIFICATION_SUMMARY.md`
   - `README_STAGE2.md`
-- **TESPy Documentation**: https://tespy.readthedocs.io/
+- **TESPy 文档**：https://tespy.readthedocs.io/
 
 ---
 
-**Framework Version**: 1.0
-**Compatible with**: stage2_detailed_model.py (post-repair)
-**Last Updated**: 2024
+**框架版本**：1.0  
+**兼容版本**：stage2_detailed_model.py（已修复）  
+**最后更新**：2024 年

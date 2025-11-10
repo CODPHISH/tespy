@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Stage2 Model Validation and Verification Module
+Stage2 模型验证与校验模块
 
-This module provides:
-1. Verification routine that solves the stage2_detailed_model post-refactor
-2. Comparison logic that reads reference CSVs and computes differences
-3. Structured reporting (JSON and Markdown) with tolerances
-4. Convergence metrics and validation evidence
+功能简介：
+1. 验证重构后的 stage2_detailed_model 是否能够独立收敛
+2. 读取参考 CSV 数据并对比当前仿真结果的差异
+3. 根据设定容差生成 JSON 与 Markdown 格式的结构化报告
+4. 输出收敛指标与验证结论
 
-Usage:
+使用方式：
     python validate_stage2_model.py [--output-dir results]
 """
 
@@ -32,15 +32,15 @@ from stage2_detailed_model import CompleteBoilerTurbineModel
 
 
 class Stage2ModelValidator:
-    """Validator for Stage2 detailed model with comparison and reporting"""
+    """Stage2 详细模型的验证器，包含对比与报告功能"""
 
     def __init__(self, reference_path: Path | None = None, output_dir: Path | None = None):
         """
-        Initialize validator
+        初始化验证器
         
-        Args:
-            reference_path: Path to reference CSV data directory
-            output_dir: Output directory for reports
+        参数：
+            reference_path: 参考 CSV 数据目录路径
+            output_dir: 报告输出目录
         """
         self.reference_path = reference_path or PROJECT_ROOT / "boiler-turbine_design_state"
         self.output_dir = output_dir or PROJECT_ROOT / "validation_results"
@@ -51,28 +51,28 @@ class Stage2ModelValidator:
         self.comparison_results: dict[str, Any] = {}
         self.convergence_metrics: dict[str, Any] = {}
         
-        # Define tolerances for comparison
+        # 对比容差设定
         self.tolerances = {
-            "mass_flow": {"absolute": 0.1, "relative": 0.01},  # 0.1 t/h or 1%
-            "pressure": {"absolute": 0.5, "relative": 0.01},   # 0.5 bar or 1%
-            "temperature": {"absolute": 2.0, "relative": 0.01}, # 2°C or 1%
-            "enthalpy": {"absolute": 5.0, "relative": 0.01},   # 5 kJ/kg or 1%
-            "power": {"absolute": 0.1, "relative": 0.02},      # 0.1 MW or 2%
+            "mass_flow": {"absolute": 0.1, "relative": 0.01},  # 0.1 t/h 或 1%
+            "pressure": {"absolute": 0.5, "relative": 0.01},   # 0.5 bar 或 1%
+            "temperature": {"absolute": 2.0, "relative": 0.01}, # 2°C 或 1%
+            "enthalpy": {"absolute": 5.0, "relative": 0.01},   # 5 kJ/kg 或 1%
+            "power": {"absolute": 0.1, "relative": 0.02},      # 0.1 MW 或 2%
         }
 
     def load_reference_data(self) -> None:
-        """Load reference CSV data"""
+        """读取参考 CSV 数据"""
         print("\n" + "=" * 80)
-        print("Loading Reference Data")
+        print("加载参考数据")
         print("=" * 80)
         
-        # Load connections
+        # 读取连接数据
         conn_path = self.reference_path / "connections.csv"
         if conn_path.exists():
             self.reference_data["connections"] = pd.read_csv(conn_path, sep=';', index_col=0)
-            print(f"✓ Loaded {len(self.reference_data['connections'])} reference connections")
+            print(f"✓ 已加载 {len(self.reference_data['connections'])} 条参考连接数据")
         
-        # Load components
+        # 读取组件数据
         comp_dir = self.reference_path / "components"
         if comp_dir.exists():
             for csv_file in comp_dir.glob("*.csv"):
@@ -81,55 +81,55 @@ class Stage2ModelValidator:
                     df = pd.read_csv(csv_file, sep=';', index_col=0)
                     if not df.empty:
                         self.reference_data[comp_type] = df
-                        print(f"✓ Loaded {len(df)} {comp_type} components")
+                        print(f"✓ 已加载 {len(df)} 个 {comp_type} 组件参数")
                 except Exception as e:
-                    print(f"⚠ Failed to load {csv_file}: {e}")
+                    print(f"⚠ 读取 {csv_file} 失败: {e}")
 
     def verify_model_convergence(self) -> bool:
         """
-        Verify that the model solves successfully post-refactor
+        验证模型在重构后能够独立求解并成功收敛
         
-        Returns:
-            True if model converges, False otherwise
+        返回：
+            模型收敛则返回 True，否则返回 False
         """
         print("\n" + "=" * 80)
-        print("Model Verification - Convergence Test")
+        print("模型验证 - 收敛性测试")
         print("=" * 80)
         
         try:
-            # Create model instance
+            # 创建模型实例
             self.model = CompleteBoilerTurbineModel()
             
-            # Build network
-            print("\n[1/3] Building network...")
+            # 构建网络
+            print("\n[1/3] 构建网络...")
             self.model.build_network()
-            print("✓ Network built successfully")
+            print("✓ 网络构建成功")
             
-            # Solve
-            print("\n[2/3] Solving network...")
+            # 求解
+            print("\n[2/3] 求解网络...")
             success = self.model.solve(use_reference_init=False, allow_fallback=False)
             
             if not success:
-                print("✗ Model failed to converge without using exported solver state")
+                print("✗ 模型在不使用导出求解状态的情况下未能收敛")
                 return False
             
-            print("✓ Model converged successfully")
+            print("✓ 模型收敛成功")
             
-            # Collect convergence metrics
-            print("\n[3/3] Collecting convergence metrics...")
+            # 收集收敛指标
+            print("\n[3/3] 收集收敛指标...")
             self._collect_convergence_metrics()
-            print("✓ Convergence metrics collected")
+            print("✓ 收敛指标已收集")
             
             return True
             
         except Exception as e:
-            print(f"✗ Verification failed with error: {e}")
+            print(f"✗ 验证失败，错误信息: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def _collect_convergence_metrics(self) -> None:
-        """Collect convergence metrics from solved model"""
+        """从已收敛的模型中收集收敛指标"""
         if not self.model or not self.model.nw or not self.model.nw.converged:
             return
         
@@ -145,17 +145,17 @@ class Stage2ModelValidator:
 
     def compare_with_reference(self) -> dict[str, Any]:
         """
-        Compare current simulation outputs with reference data
+        将当前仿真输出与参考数据进行对比
         
-        Returns:
-            Dictionary with comparison results
+        返回：
+            包含对比结果的字典
         """
         print("\n" + "=" * 80)
-        print("Comparison with Reference Data")
+        print("与参考数据对比")
         print("=" * 80)
         
         if not self.model or not self.model.nw or not self.model.nw.converged:
-            print("✗ Model not converged, cannot compare")
+            print("✗ 模型未收敛，无法进行对比")
             return {}
         
         results = {
@@ -701,60 +701,60 @@ class Stage2ModelValidator:
 
     def run_full_validation(self) -> bool:
         """
-        Run full validation workflow
+        执行完整的验证流程
         
-        Returns:
-            True if validation passed, False otherwise
+        返回：
+            验证通过返回 True，否则返回 False
         """
         print("\n" + "=" * 80)
-        print("STAGE2 MODEL VALIDATION WORKFLOW")
+        print("STAGE2 模型验证流程")
         print("=" * 80)
         
-        # Step 1: Load reference data
+        # 步骤 1：加载参考数据
         self.load_reference_data()
         
-        # Step 2: Verify model convergence
+        # 步骤 2：验证模型收敛性
         converged = self.verify_model_convergence()
         
         if not converged:
             print("\n" + "=" * 80)
-            print("VALIDATION RESULT: ❌ FAILED (Model did not converge)")
+            print("验证结果：❌ 失败（模型未收敛）")
             print("=" * 80)
             
-            # Still generate reports with what we have
+            # 仍然生成已有信息的报告
             self.generate_json_report()
             self.generate_markdown_report()
             self.generate_repair_documentation()
             
             return False
         
-        # Step 3: Compare with reference
+        # 步骤 3：与参考数据对比
         self.compare_with_reference()
         
-        # Step 4: Analyze results from model
+        # 步骤 4：分析模型结果
         if self.model:
             self.model.analyze()
         
-        # Step 5: Generate reports
+        # 步骤 5：生成报告
         self.generate_json_report()
         self.generate_markdown_report()
         self.generate_repair_documentation()
         
-        # Determine overall pass/fail
+        # 依据匹配率判定是否通过
         if self.comparison_results and "summary" in self.comparison_results:
             match_rate = self.comparison_results["summary"].get("match_rate", 0)
-            passed = match_rate >= 0.85  # 85% threshold
+            passed = match_rate >= 0.85  # 85% 为通过阈值
         else:
             passed = False
         
         print("\n" + "=" * 80)
         if passed:
-            print("VALIDATION RESULT: ✅ PASSED")
+            print("验证结果：✅ 通过")
         else:
-            print("VALIDATION RESULT: ⚠️  PASSED WITH WARNINGS")
+            print("验证结果：⚠️ 警告通过（请检查报告详情）")
         print("=" * 80)
         
-        print(f"\nReports generated in: {self.output_dir}")
+        print(f"\n报告已输出至: {self.output_dir}")
         print("  - validation_report.json")
         print("  - VALIDATION_REPORT.md")
         print("  - REPAIR_AND_VALIDATION_ANALYSIS.md")
@@ -763,31 +763,31 @@ class Stage2ModelValidator:
 
 
 def main():
-    """Main entry point"""
+    """主程序入口"""
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Validate Stage2 Detailed Model"
+        description="Stage2 详细模型验证"
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("validation_results"),
-        help="Output directory for reports"
+        help="报告输出目录"
     )
     parser.add_argument(
         "--reference-path",
         type=Path,
         default=None,
-        help="Path to reference CSV data"
+        help="参考 CSV 数据路径"
     )
     
     args = parser.parse_args()
     
-    # Set logging level
+    # 设置日志级别
     logging.getLogger("tespy").setLevel(logging.WARNING)
     
-    # Create validator and run
+    # 创建验证器并执行
     validator = Stage2ModelValidator(
         reference_path=args.reference_path,
         output_dir=args.output_dir

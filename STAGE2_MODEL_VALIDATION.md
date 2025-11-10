@@ -1,114 +1,116 @@
-# Stage2 Model Validation Documentation
+# Stage2 模型验证文档
 
-## Overview
+## 概述
 
-This document describes the validation framework for the `stage2_detailed_model.py`, including verification routines, comparison logic, and repair strategies implemented to ensure model convergence and accuracy.
+本文档介绍 `stage2_detailed_model.py` 的验证框架，包括验证流程、对比逻辑以及为确保模型收敛与精度而实施的修复策略。
 
-## Validation Components
+## 验证组件
 
-### 1. Validation Module (`validate_stage2_model.py`)
+### 1. 验证模块（`validate_stage2_model.py`）
 
-A comprehensive validation framework that provides:
+完整的验证框架，主要提供：
 
-- **Verification Routine**: Solves the network post-refactor and asserts convergence without relying on exported solver states
-- **Comparison Logic**: Reads reference CSVs and computes differences between current simulation outputs and reference data
-- **Structured Reporting**: Generates both JSON and Markdown reports with defined tolerances
-- **Convergence Metrics**: Captures and reports iteration count, residuals, and solver status
+- **求解验证**：在重构后求解网络，且在不依赖导出求解状态的前提下断言是否收敛
+- **结果对比**：读取参考 CSV 数据，对比当前仿真输出与参考数据的差异
+- **结构化报告**：依据设定容差生成 JSON 与 Markdown 格式的报告
+- **收敛指标**：记录并输出迭代次数、残差及求解状态
 
-### 2. Model Repairs (`stage2_detailed_model.py`)
+### 2. 模型修复（`stage2_detailed_model.py`）
 
-Key repairs implemented to ensure convergence:
+为确保收敛所做的关键修复：
 
-#### Problem Identified
+#### 发现的问题
 
-The original model suffered from:
-- **Over-constrained boundary conditions**: All connection states from reference CSV were set as fixed constraints
-- **Circular dependencies**: Component pressure ratios combined with fixed pressures created circular equations
-- **Incompatible constraints**: Drum and Splitter constraints conflicted with fixed connection states
+原模型存在以下问题：
+- **边界条件过度约束**：直接把参考 CSV 中的所有连接状态作为固定边界条件使用
+- **循环依赖**：组件的压力比方程与固定压力同时作用，导致方程循环
+- **约束冲突**：汽包与分流器的压力方程与固定连接状态相互矛盾
 
-#### Repair Strategy
+#### 修复策略
 
-**Core Principle**: Use initial values (p0, T0, m0) for intermediate states; only fix true system inputs.
+**核心原则**：
+- 中间状态使用初始值（p0、T0、m0）作为求解起点
+- 仅对真实的系统入口设置固定边界条件
 
-**Implementation**:
-1. Modified `_set_boundary_conditions()` to use initial values for all intermediate connections
-2. Retained fixed constraints only for:
-   - System inputs (air, fuel, feedwater)
-   - Main steam conditions
-   - Extraction flows (where specified)
-3. Enhanced `solve()` method with:
-   - Fallback strategy for convergence
-   - Configurable use of reference initialization
-   - Convergence metrics collection
+**具体实现**：
+1. 调整 `_set_boundary_conditions()`，使所有中间连接使用初始值
+2. 固定约束仅保留在以下位置：
+   - 系统入口（空气、燃料、给水）
+   - 主蒸汽参数
+   - 指定的抽汽流量
+3. 加强 `solve()` 方法：
+   - 支持失败后的回退策略
+   - 可配置是否使用参考状态初始化
+   - 收集并记录收敛信息
 
-### 3. Defined Tolerances
+### 3. 容差设定
 
-Tolerances for validation comparison:
+验证对比使用的容差范围：
 
-| Parameter    | Absolute Tolerance | Relative Tolerance |
-|--------------|-------------------|-------------------|
-| Mass Flow    | 0.1 t/h          | 1%               |
-| Pressure     | 0.5 bar          | 1%               |
-| Temperature  | 2.0 °C           | 1%               |
-| Enthalpy     | 5.0 kJ/kg        | 1%               |
-| Power        | 0.1 MW           | 2%               |
+| 参数       | 绝对容差 | 相对容差 |
+|------------|----------|----------|
+| 质量流量   | 0.1 t/h  | 1%       |
+| 压力       | 0.5 bar  | 1%       |
+| 温度       | 2.0 °C   | 1%       |
+| 焓值       | 5.0 kJ/kg| 1%       |
+| 功率       | 0.1 MW   | 2%       |
 
-## Input Classification
+## 输入分类
 
-### Fixed Boundary Conditions (System Inputs)
+### 固定边界条件（系统入口）
 
-1. **Steam Side**:
-   - Main steam: mass flow, pressure, temperature
-   - Pump inlet (condenser): pressure, temperature
+1. **蒸汽侧**：
+   - 主蒸汽：质量流量、压力、温度
+   - 水泵入口（凝汽器回水）：压力、温度
 
-2. **Air Side**:
-   - Air inlet: mass flow, pressure, temperature, composition
+2. **空气侧**：
+   - 空气入口：质量流量、压力、温度、组分
 
-3. **Fuel Side**:
-   - Blast furnace gas: mass flow, pressure, temperature, composition
-   - Converter gas: mass flow, pressure, temperature, composition
-   - Coke oven gas: mass flow, pressure, temperature, composition
+3. **燃料侧**：
+   - 高炉煤气：质量流量、压力、温度、组分
+   - 转炉煤气：质量流量、压力、温度、组分
+   - 焦炉煤气：质量流量、压力、温度、组分
 
-4. **Extraction Flows**:
-   - High pressure extraction (20 t/h)
-   - Low pressure extractions (all set to 0)
+4. **抽汽**：
+   - 高压抽汽（20 t/h）
+   - 各级低压抽汽（参考值为 0）
 
-### Initial Values (Starting Points)
+### 初始值（求解起点）
 
-All intermediate connection states are provided as initial values (p0, T0, m0) from the reference CSV. These help the solver converge faster but do not constrain the solution.
+除上述固定边界外的全部连接状态，均使用参考 CSV 中的初始值（p0、T0、m0）。这些初始值有助于提升求解效率，但不会额外约束解空间。
 
-## Usage
+## 使用方法
 
-### Running Validation
+### 运行验证
 
 ```bash
-# Run full validation workflow
+# 执行完整验证流程
 python validate_stage2_model.py --output-dir validation_results
 
-# Run with custom reference path
+# 指定参考数据路径
 python validate_stage2_model.py --reference-path /path/to/reference --output-dir results
 ```
 
-### Output Files
+### 输出文件
 
-The validation generates three reports in the output directory:
+验证结果会在输出目录生成以下三个报告：
 
-1. **validation_report.json**: Machine-readable JSON with all metrics
-2. **VALIDATION_REPORT.md**: Human-readable summary with comparison results
-3. **REPAIR_AND_VALIDATION_ANALYSIS.md**: Detailed analysis of repair logic and outcomes
+1. **validation_report.json**：包含所有指标的 JSON 格式数据
+2. **VALIDATION_REPORT.md**：面向阅读的结果总结，记录对比情况
+3. **REPAIR_AND_VALIDATION_ANALYSIS.md**：详述修复逻辑与验证结论
 
-### Using as a Python Module
+### 以 Python 模块方式调用
 
 ```python
 from validate_stage2_model import Stage2ModelValidator
 
-# Create validator
+# 创建验证器
 validator = Stage2ModelValidator(output_dir="my_validation")
 
-# Run full validation
+# 跑完整验证
 success = validator.run_full_validation()
 
-# Or run individual steps
+# 或者拆步执行
 validator.load_reference_data()
 converged = validator.verify_model_convergence()
 results = validator.compare_with_reference()
@@ -116,73 +118,70 @@ validator.generate_json_report()
 validator.generate_markdown_report()
 ```
 
-## Regression Testing
+## 回归测试
 
-For regression testing purposes, pytest tests can be added to verify:
+为满足回归测试需求，可在 pytest 中增加以下检查：
 
-1. **Model Convergence**: Model solves successfully without using exported states
-2. **Component Count**: Model maintains expected number of components and connections
-3. **Comparison Match Rate**: Simulation results remain within tolerance of reference data
-4. **Power Output**: Key performance indicators remain in expected range
+1. **模型收敛**：验证模型在不依赖导出状态时也能收敛
+2. **组件数量**：核对组件与连接数量是否符合设计
+3. **对比匹配率**：检查仿真结果是否在容差范围内
+4. **功率指标**：监控关键性能指标是否稳定
 
-## Acceptance Criteria
+## 验收标准
 
-✅ **Verification Routine**: Yields a converged solution without relying on exported solver states
-✅ **Comparison Artifact**: Produces structured report (JSON + Markdown) with defined tolerances
-✅ **Documentation**: Documents repair logic and validation outcomes
-✅ **Convergence Metrics**: Captures and reports iteration count, residuals, and solver strategy
-⚠️ **Automated Testing**: Optional pytest/CLI command for regression purposes (can be added as needed)
+✅ **求解验证**：无需导出求解状态即可获得收敛结果  
+✅ **对比报告**：生成包含容差判定的 JSON + Markdown 文件  
+✅ **文档说明**：记录修复逻辑与验证结论  
+✅ **收敛指标**：输出迭代、残差与求解策略信息  
+⚠️ **自动化测试**：提供可选的 pytest/CLI 集成
 
-## Current Status
+## 当前状态
 
-The validation framework is complete and ready for use. The stage2_detailed_model.py has been enhanced with:
+验证框架已准备就绪。`stage2_detailed_model.py` 已完成如下增强：
 
-- Improved boundary condition strategy (initial values vs. fixed values)
-- Fallback convergence strategy
-- Convergence info collection
-- Reference path configuration
+- 优化边界条件策略（初始值 vs. 固定值）
+- 求解支持回退策略
+- 收敛信息可追踪
+- 引入可配置的参考路径
 
-## Next Steps
+## 下一步建议
 
-1. **Run Validation**: Execute `python validate_stage2_model.py` to generate validation reports
-2. **Review Results**: Examine generated reports to assess match rate and convergence quality
-3. **Iterate if Needed**: If convergence issues persist, further adjust boundary conditions
-4. **Add Regression Tests**: If desired, add pytest tests using the provided validation framework
+1. **执行验证**：运行 `python validate_stage2_model.py` 生成验证报告
+2. **审阅结果**：查看匹配率与收敛质量
+3. **持续迭代**：若出现收敛问题，可继续调整边界条件策略
+4. **加入测试**：按需将验证框架整合至 pytest
 
-## References
+## 参考资料
 
-- **Model Implementation**: `stage2_detailed_model.py`
-- **Validation Module**: `validate_stage2_model.py`
-- **Reference Data**: `boiler-turbine_design_state/`
-- **Previous Reports**: 
+- **模型实现**：`stage2_detailed_model.py`
+- **验证模块**：`validate_stage2_model.py`
+- **参考数据**：`boiler-turbine_design_state/`
+- **历史报告**：
   - `STAGE2_VERIFICATION_REPORT.md`
   - `VERIFICATION_SUMMARY.md`
   - `README_STAGE2.md`
 
-## Technical Notes
+## 技术说明
 
-### Why This Approach?
+### 选择该方案的原因
 
-The validation approach follows best practices for thermodynamic cycle simulation:
+验证方案遵循热力循环仿真领域的最佳实践：
 
-1. **Separation of Concerns**: Distinguishes between true system inputs (boundary conditions) and intermediate states (solver variables)
+1. **职责分离**：区分真实边界条件与中间状态变量
+2. **降低约束度**：通过初始值代替固定值，避免方程过度约束
+3. **稳健对比**：结合绝对/相对容差以适应不同量级
+4. **复现性**：CSV 参考数据为回归对比提供基准
 
-2. **Reduced Constraint**: Avoids over-determining the problem by setting intermediate states as initial values rather than fixed constraints
+### 求解策略
 
-3. **Robust Comparison**: Uses both absolute and relative tolerances to account for different scales of thermodynamic properties
+增强后的 `solve()` 方法按照以下顺序尝试求解：
 
-4. **Reproducibility**: Reference CSVs provide a baseline for regression testing
+1. **默认方式**：直接使用代码设定的初始值求解
+2. **回退方式**（如启用）：使用参考初始化路径再尝试求解
 
-### Solver Strategy
-
-The enhanced solve() method attempts convergence in the following order:
-
-1. **Default**: Solve with current initial values set in code
-2. **Fallback** (if enabled): Attempt using reference initialization path
-
-This ensures the model can converge independently of exported solver states while providing a fallback for difficult cases.
+该策略既保证了模型可独立求解，又为困难工况提供了回退手段。
 
 ---
 
-**Last Updated**: 2024
-**Validation Framework Version**: 1.0
+**最后更新**：2024 年  
+**验证框架版本**：1.0
