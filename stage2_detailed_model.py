@@ -298,18 +298,21 @@ class CompleteBoilerTurbineModel:
         
         仅保留对求解必需的效率与关键压力比参数，避免过度约束。
         """
-        # 汽轮机参数 - 仅设置等熵效率，压力比由网络求解
+        # 汽轮机参数 - 设置等熵效率和压力比
         if 'Turbine' in self.component_data:
             for name, params in self.component_data['Turbine'].items():
                 try:
                     comp = nw.get_comp(name)
                     eta_s = params.get('eta_s')
+                    pr = params.get('pr')
                     if eta_s is not None:
                         comp.set_attr(eta_s=eta_s)
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
         
-        # 换热器参数 - 设置传热系数与水/汽侧压降
+        # 换热器参数 - 设置传热系数与水/蒸汽侧压力比
         if 'HeatExchanger' in self.component_data:
             for name, params in self.component_data['HeatExchanger'].items():
                 try:
@@ -318,10 +321,14 @@ class CompleteBoilerTurbineModel:
                     pr2 = params.get('pr2')
                     if kA is not None:
                         comp.set_attr(kA=kA)
-                    if pr2 is not None and name not in {
-                        "1#发电锅炉_蒸发器上升管",
-                        "1#发电锅炉_上级省煤器",
-                        "1#发电锅炉_下级省煤器",
+                    # 设置主要蒸汽侧换热器的pr2
+                    if pr2 is not None and name in {
+                        "1#发电锅炉_低温过热器",
+                        "1#发电锅炉_屏式过热器",
+                        "1#发电锅炉_三级过热器",
+                        "1#发电锅炉_末级过热器",
+                        "1#发电锅炉_低温再热器",
+                        "1#发电锅炉_末级再热器",
                     }:
                         comp.set_attr(pr2=pr2)
                 except KeyError:
@@ -341,39 +348,23 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        # 阀门参数 - 设置压力比保持节流特性
-        if 'Valve' in self.component_data:
-            for name, params in self.component_data['Valve'].items():
-                try:
-                    comp = nw.get_comp(name)
-                    pr = params.get('pr')
-                    if pr is not None:
-                        comp.set_attr(pr=pr)
-                except KeyError:
-                    pass
+        # 阀门参数 - 暂不设置压力比（由网络求解）
+        # 管道参数 - 暂不设置压力比（由网络求解）
 
-        # 管道参数 - 设置压力比
-        if 'Pipe' in self.component_data:
-            for name, params in self.component_data['Pipe'].items():
-                try:
-                    comp = nw.get_comp(name)
-                    pr = params.get('pr')
-                    if pr is not None:
-                        comp.set_attr(pr=pr)
-                except KeyError:
-                    pass
-
-        # 燃烧室参数 - 设置空气系数和效率
+        # 燃烧室参数 - 设置空气系数、效率和热输入
         if 'DiabaticCombustionChamber' in self.component_data:
             for name, params in self.component_data['DiabaticCombustionChamber'].items():
                 try:
                     comp = nw.get_comp(name)
                     lamb = params.get('lamb')
                     eta = params.get('eta')
+                    pr = params.get('pr')
                     if lamb is not None:
                         comp.set_attr(lamb=lamb)
                     if eta is not None:
                         comp.set_attr(eta=eta)
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
 
@@ -404,11 +395,11 @@ class CompleteBoilerTurbineModel:
 
         # === 仅设置关键固定边界条件 ===
 
-        # 主蒸汽：固定流量、压力、温度（不设置fluid以避免线性分支重复）
+        # 主蒸汽：固定流量与温度，压力由换热器pr2决定
         try:
             conn = nw.get_conn("1#发电锅炉_主蒸汽")
             data = conn_data.get("1#发电锅炉_主蒸汽", {})
-            conn.set_attr(m=data.get('m'), p=data.get('p'), T=data.get('T'))
+            conn.set_attr(m=data.get('m'), T=data.get('T'))
         except KeyError:
             pass
 
@@ -457,10 +448,19 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 汽包饱和蒸汽：固定干度
+        # 汽包饱和蒸汽：固定干度与压力
         try:
             conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
-            conn.set_attr(x=1.0)
+            data = conn_data.get("1#发电锅炉_汽包饱和蒸汽出口", {})
+            conn.set_attr(x=1.0, p=data.get('p'))
+        except KeyError:
+            pass
+
+        # 再热蒸汽出口：固定温度
+        try:
+            conn = nw.get_conn("1#发电锅炉_再热蒸汽高再出口")
+            data = conn_data.get("1#发电锅炉_再热蒸汽高再出口", {})
+            conn.set_attr(T=data.get('T'))
         except KeyError:
             pass
 
@@ -488,6 +488,53 @@ class CompleteBoilerTurbineModel:
             conn.set_attr(m=0.0)
         except KeyError:
             pass
+
+        # 再热蒸汽入口：固定质量流量
+        try:
+            conn = nw.get_conn("1#发电锅炉_再热蒸汽入口")
+            data = conn_data.get("1#发电锅炉_再热蒸汽入口", {})
+            conn.set_attr(m=data.get('m'))
+        except KeyError:
+            pass
+
+        # 添加关键烟气温度点作为约束（不包括燃烧烟气，因为由燃烧室计算）
+        flue_temp_points = [
+            # "1#发电锅炉_燃烧烟气",  # 由燃烧室计算，不固定
+            "1#发电锅炉_末过烟气入口",
+            "1#发电锅炉_三过烟气入口",
+            "1#发电锅炉_低过烟气入口",
+            "1#发电锅炉_低再烟气入口",
+            "1#发电锅炉_上省烟气入口",
+            "1#发电锅炉_下省烟气入口",
+            "1#发电锅炉_空预烟气入口",
+            "1#发电锅炉_煤预烟气出口",
+        ]
+        for label in flue_temp_points:
+            try:
+                conn = nw.get_conn(label)
+                data = conn_data.get(label, {})
+                if data.get('T') is not None:
+                    conn.set_attr(T=data.get('T'))
+            except KeyError:
+                pass
+
+        # 添加几个关键的水/蒸汽侧温度点
+        steam_temp_points = [
+            "1#发电锅炉_蒸汽低过出口",
+            "1#发电锅炉_蒸汽屏过出口",
+            "1#发电锅炉_蒸汽三过出口",
+            "1#发电锅炉_再热蒸汽低再出口",
+            "1#发电锅炉_水侧上省入口",
+            "1#发电锅炉_水泵出口",
+        ]
+        for label in steam_temp_points:
+            try:
+                conn = nw.get_conn(label)
+                data = conn_data.get(label, {})
+                if data.get('T') is not None:
+                    conn.set_attr(T=data.get('T'))
+            except KeyError:
+                pass
 
         print("   ✓ 边界条件设置完成（使用初始值策略避免过度约束）")
 
