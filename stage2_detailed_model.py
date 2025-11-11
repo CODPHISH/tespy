@@ -298,21 +298,18 @@ class CompleteBoilerTurbineModel:
         
         仅保留对求解必需的效率与关键压力比参数，避免过度约束。
         """
-        # 汽轮机参数 - 设置效率和压力比（必要设计参数）
+        # 汽轮机参数 - 仅设置等熵效率，压力比由网络求解
         if 'Turbine' in self.component_data:
             for name, params in self.component_data['Turbine'].items():
                 try:
                     comp = nw.get_comp(name)
                     eta_s = params.get('eta_s')
-                    pr = params.get('pr')
                     if eta_s is not None:
                         comp.set_attr(eta_s=eta_s)
-                    if pr is not None:
-                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
         
-        # 换热器参数 - 设置传热系数与水/蒸汽侧压力比
+        # 换热器参数 - 设置传热系数与水/汽侧压降
         if 'HeatExchanger' in self.component_data:
             for name, params in self.component_data['HeatExchanger'].items():
                 try:
@@ -321,13 +318,16 @@ class CompleteBoilerTurbineModel:
                     pr2 = params.get('pr2')
                     if kA is not None:
                         comp.set_attr(kA=kA)
-                    # 仅设置水/蒸汽侧的压降（pr2），不设置烟气侧（pr1）
-                    if pr2 is not None:
+                    if pr2 is not None and name not in {
+                        "1#发电锅炉_蒸发器上升管",
+                        "1#发电锅炉_上级省煤器",
+                        "1#发电锅炉_下级省煤器",
+                    }:
                         comp.set_attr(pr2=pr2)
                 except KeyError:
                     pass
         
-        # 泵参数 - 设置效率和压力比（保持设计特性）
+        # 泵参数 - 设置效率与压力比（维持主循环压升）
         if 'Pump' in self.component_data:
             for name, params in self.component_data['Pump'].items():
                 try:

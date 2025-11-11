@@ -545,11 +545,44 @@ hp_inlet_valve.set_attr(zeta='var')  # 从设计工况继承zeta值
 3. **离设计策略**：使用特性曲线或保持设计值，避免过度约束
 4. **验证与校核**：对比CSV导出结果与模型计算结果，确保一致性
 
-## 8. 参考文献
+## 8. 验证与对比
+
+### 8.1 验证报告
+
+详细的模型验证结果请参阅：
+- **docs/stage2详细模型验证报告.md**：完整的验证流程、结果对比及结论
+
+### 8.2 对比脚本
+
+项目提供独立的对比脚本用于结果验证：
+
+```bash
+# 运行完整验证流程
+python validate_stage2_model.py --output-dir validation_results
+
+# 运行独立对比脚本
+python compare_stage2_results.py --reference boiler-turbine_design_state \
+                                   --output comparison_results
+```
+
+### 8.3 对比容差
+
+参照工程实践，设定以下对比容差：
+
+| 参数类型 | 绝对容差 | 相对容差 |
+|---------|---------|----------|
+| 质量流量 | ±0.1 t/h | ±1% |
+| 压力 | ±0.5 bar | ±1% |
+| 温度 | ±2.0 °C | ±1% |
+| 焓 | ±5.0 kJ/kg | ±1% |
+| 功率 | ±0.1 MW | ±2% |
+
+## 9. 参考文献
 
 - TESPy官方文档：https://tespy.readthedocs.io/
 - TESPy源代码：`src/tespy/components/`
 - 本项目CSV数据：`boiler-turbine_design_state/`
+- 验证报告：`docs/stage2详细模型验证报告.md`
 
 ---
 
@@ -558,3 +591,5 @@ hp_inlet_valve.set_attr(zeta='var')  # 从设计工况继承zeta值
 **分析工具**：Python 3.10 + TESPy + Pandas
 
 **数据来源**：boiler-turbine_design_state目录下的CSV导出文件
+
+**最后更新**：2024年（增加验证与对比章节）

@@ -183,11 +183,13 @@ pytest -v test_stage2_validation.py
 
 | 标准 | 状态 | 说明 |
 |------|------|------|
-| 求解验证产生收敛结果 | ✅ | 模型无需导出求解状态也能求解 |
+| 求解验证产生收敛结果 | ⚠️ | 模型基于静态数据（需调试约束平衡） |
 | 带容差的对比报告 | ✅ | 生成 JSON + Markdown 报告并设定容差 |
 | 修复逻辑文档 | ✅ | REPAIR_AND_VALIDATION_ANALYSIS.md 记录策略 |
 | 收敛指标 | ✅ | 收集并输出迭代、残差、状态 |
 | 可选 pytest/CLI 命令 | ✅ | 提供 CLI 脚本与 pytest 示例 |
+| 独立对比脚本 | ✅ | compare_stage2_results.py 可独立运行 |
+| 中文验证报告 | ✅ | docs/stage2详细模型验证报告.md |
 
 ## 文件清单
 
