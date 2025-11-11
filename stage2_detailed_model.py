@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """完整复刻connections.csv的详细建模
-基于boiler-turbine_design_state目录下的CSV文件重建完整模型结构
+基于静态数据结构重建完整模型结构（已移除CSV读取逻辑）
 """
 
 from __future__ import annotations
@@ -10,12 +10,14 @@ import json
 import logging
 from pathlib import Path
 import sys
-import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_PATH = PROJECT_ROOT / "src"
 if SRC_PATH.exists():
     sys.path.insert(0, str(SRC_PATH))
+
+# 导入静态数据
+from stage2_static_inputs import CONNECTIONS_DATA, COMPONENT_DATA
 
 from tespy.networks import Network
 from tespy.components import (
@@ -45,37 +47,16 @@ class CompleteBoilerTurbineModel:
         self.connections: dict = {}
         self.results: dict = {}
         self.convergence_info: dict = {}
-        self.reference_path = PROJECT_ROOT / "boiler-turbine_design_state"
-        
-        # 读取CSV数据
-        self.load_csv_data()
+        self.component_data = COMPONENT_DATA
+        self.connection_data = CONNECTIONS_DATA
 
-    def load_csv_data(self) -> None:
-        """从CSV文件加载组件和连接数据"""
-        base_path = self.reference_path
-        
-        # 读取连接数据
-        self.conn_df = pd.read_csv(base_path / "connections.csv", sep=';')
-        
-        # 读取组件数据
-        comp_path = base_path / "components"
-        self.comp_dfs = {}
-        for csv_file in comp_path.glob("*.csv"):
-            comp_type = csv_file.stem
-            try:
-                df = pd.read_csv(csv_file, sep=';')
-                if not df.empty and len(df) > 0:
-                    self.comp_dfs[comp_type] = df
-            except Exception as e:
-                print(f"Warning: Failed to load {csv_file}: {e}")
-        
-        print(f"✓ 加载了 {len(self.conn_df)} 条连接定义")
-        print(f"✓ 加载了 {sum(len(df) for df in self.comp_dfs.values())} 个组件定义")
+        print(f"✓ 已加载 {len(self.connection_data)} 条连接静态数据")
+        print(f"✓ 已加载 {sum(len(v) for v in self.component_data.values())} 个组件参数条目")
 
     def build_network(self) -> Network:
         """构建完整网络"""
         print("\n" + "=" * 80)
-        print("完整建模 - 基于connections.csv的完整复刻")
+        print("完整建模 - 基于静态数据的完整复刻")
         print("=" * 80)
 
         nw = Network(
@@ -313,216 +294,186 @@ class CompleteBoilerTurbineModel:
         return nw
 
     def _set_component_parameters(self, nw: Network) -> None:
-        """设置组件参数（从CSV读取）"""
-        # 汽轮机参数
-        if 'Turbine' in self.comp_dfs:
-            turb_df = self.comp_dfs['Turbine']
-            for _, row in turb_df.iterrows():
-                name = row.iloc[0]
+        """设置组件参数（从静态数据读取）
+        
+        仅保留对求解必需的效率与关键压力比参数，避免过度约束。
+        """
+        # 汽轮机参数 - 设置效率和压力比（必要设计参数）
+        if 'Turbine' in self.component_data:
+            for name, params in self.component_data['Turbine'].items():
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['eta_s']):
-                        comp.set_attr(eta_s=row['eta_s'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
+                    eta_s = params.get('eta_s')
+                    pr = params.get('pr')
+                    if eta_s is not None:
+                        comp.set_attr(eta_s=eta_s)
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
         
-        # 换热器参数
-        if 'HeatExchanger' in self.comp_dfs:
-            hx_df = self.comp_dfs['HeatExchanger']
-            for _, row in hx_df.iterrows():
-                name = row.iloc[0]
+        # 换热器参数 - 设置传热系数与水/蒸汽侧压力比
+        if 'HeatExchanger' in self.component_data:
+            for name, params in self.component_data['HeatExchanger'].items():
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['kA']):
-                        comp.set_attr(kA=row['kA'])
-                    if pd.notna(row['pr1']):
-                        comp.set_attr(pr1=row['pr1'])
-                    if pd.notna(row['pr2']):
-                        comp.set_attr(pr2=row['pr2'])
+                    kA = params.get('kA')
+                    pr2 = params.get('pr2')
+                    if kA is not None:
+                        comp.set_attr(kA=kA)
+                    # 仅设置水/蒸汽侧的压降（pr2），不设置烟气侧（pr1）
+                    if pr2 is not None:
+                        comp.set_attr(pr2=pr2)
                 except KeyError:
                     pass
         
-        # 泵参数
-        if 'Pump' in self.comp_dfs:
-            pump_df = self.comp_dfs['Pump']
-            for _, row in pump_df.iterrows():
-                name = row.iloc[0]
+        # 泵参数 - 设置效率和压力比（保持设计特性）
+        if 'Pump' in self.component_data:
+            for name, params in self.component_data['Pump'].items():
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['eta_s']):
-                        comp.set_attr(eta_s=row['eta_s'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
+                    eta_s = params.get('eta_s')
+                    pr = params.get('pr')
+                    if eta_s is not None:
+                        comp.set_attr(eta_s=eta_s)
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
         
-        # 阀门参数
-        if 'Valve' in self.comp_dfs:
-            valve_df = self.comp_dfs['Valve']
-            for _, row in valve_df.iterrows():
-                name = row.iloc[0]
+        # 阀门参数 - 设置压力比保持节流特性
+        if 'Valve' in self.component_data:
+            for name, params in self.component_data['Valve'].items():
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
+                    pr = params.get('pr')
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
-        
-        # 管道参数
-        if 'Pipe' in self.comp_dfs:
-            pipe_df = self.comp_dfs['Pipe']
-            for _, row in pipe_df.iterrows():
-                name = row.iloc[0]
+
+        # 管道参数 - 设置压力比
+        if 'Pipe' in self.component_data:
+            for name, params in self.component_data['Pipe'].items():
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
+                    pr = params.get('pr')
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
-        
-        # 燃烧室参数
-        if 'DiabaticCombustionChamber' in self.comp_dfs:
-            cc_df = self.comp_dfs['DiabaticCombustionChamber']
-            for _, row in cc_df.iterrows():
-                name = row.iloc[0]
+
+        # 燃烧室参数 - 设置空气系数和效率
+        if 'DiabaticCombustionChamber' in self.component_data:
+            for name, params in self.component_data['DiabaticCombustionChamber'].items():
                 try:
                     comp = nw.get_comp(name)
-                    if pd.notna(row['lamb']):
-                        comp.set_attr(lamb=row['lamb'])
-                    if pd.notna(row['pr']):
-                        comp.set_attr(pr=row['pr'])
-                    if pd.notna(row['eta']):
-                        comp.set_attr(eta=row['eta'])
+                    lamb = params.get('lamb')
+                    eta = params.get('eta')
+                    if lamb is not None:
+                        comp.set_attr(lamb=lamb)
+                    if eta is not None:
+                        comp.set_attr(eta=eta)
                 except KeyError:
                     pass
-        
-        print("   ✓ 组件参数设置完成")
+
+        print("   ✓ 组件参数设置完成（关键效率与压力参数已设置）")
 
     def _set_boundary_conditions(self, nw: Network) -> None:
-        """设置边界条件（从connections.csv读取）
+        """设置边界条件（使用静态连接数据）
         
         策略：只设置真正的入口边界条件，其他使用初始值避免过度约束
         """
-        
-        # 从CSV读取连接数据作为初始值参考
-        conn_data = {}
-        for _, row in self.conn_df.iterrows():
-            label = row.iloc[0]
-            fluids = {}
-            # TESPy流体命名：使用CoolProp标准名称
-            fluid_map = {
-                'H2O': 'water',
-                'N2': 'N2',
-                'O2': 'O2',
-                'CO2': 'CO2',
-                'CO': 'CO',
-                'H2': 'H2',
-                'CH4': 'CH4'
-            }
-            for csv_fluid, tespy_fluid in fluid_map.items():
-                if csv_fluid in row.index and pd.notna(row[csv_fluid]):
-                    if row[csv_fluid] > 0:
-                        fluids[tespy_fluid] = row[csv_fluid]
-            conn_data[label] = {
-                'm': row['m'],
-                'p': row['p'],
-                'T': row['T'],
-                'h': row['h'],
-                'x': row['x'] if pd.notna(row['x']) else None,
-                'fluid': fluids,
-            }
-        
+        conn_data = self.connection_data
+
         # === 设置所有连接的初始值（不固定） ===
+        # 注意：不在所有连接上设置fluid以避免线性分支中重复指定
         for label, data in conn_data.items():
             try:
                 conn = nw.get_conn(label)
                 if conn is None:
                     continue
-                # 使用初始值而非固定值
-                if pd.notna(data['m']) and data['m'] > 0:
+                if data['m'] is not None and data['m'] > 0:
                     conn.set_attr(m0=data['m'])
-                if pd.notna(data['p']):
+                if data['p'] is not None:
                     conn.set_attr(p0=data['p'])
-                if pd.notna(data['T']):
+                if data['T'] is not None:
                     conn.set_attr(T0=data['T'])
-                # 设置流体组分
-                if data['fluid']:
-                    conn.set_attr(fluid=data['fluid'])
             except KeyError:
                 pass
-        
+
         # === 仅设置关键固定边界条件 ===
-        
-        # 主蒸汽：固定流量、压力、温度
+
+        # 主蒸汽：固定流量、压力、温度（不设置fluid以避免线性分支重复）
         try:
             conn = nw.get_conn("1#发电锅炉_主蒸汽")
             data = conn_data.get("1#发电锅炉_主蒸汽", {})
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'water': 1})
+            conn.set_attr(m=data.get('m'), p=data.get('p'), T=data.get('T'))
         except KeyError:
             pass
-        
-        # 空气入口：固定流量、压力、温度
+
+        # 空气入口：固定流量、压力、温度、流体组分
         try:
             conn = nw.get_conn("1#发电锅炉_空气入口")
             data = conn_data.get("1#发电锅炉_空气入口", {})
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'N2': 0.76, 'O2': 0.24})
+            conn.set_attr(m=data.get('m'), p=data.get('p'), T=data.get('T'), fluid={'N2': 0.76, 'O2': 0.24})
         except KeyError:
             pass
-        
-        # 高炉煤气入口：固定流量、压力、温度
+
+        # 高炉煤气入口：固定流量、压力、温度、流体组分
         try:
             conn = nw.get_conn("boiler1_高炉煤气入口")
             data = conn_data.get("boiler1_高炉煤气入口", {})
             fluid_comp = {'N2': 0.4609, 'CO': 0.2078, 'CO2': 0.3293, 'H2': 0.002}
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
+            # 只在一个燃气入口设置压力，其他的仅设置流量和温度
+            conn.set_attr(m=data.get('m'), p=data.get('p'), T=data.get('T'), fluid=fluid_comp)
         except KeyError:
             pass
-        
-        # 转炉煤气：固定流量、压力、温度
+
+        # 转炉煤气：固定流量、温度、流体组分（不设置压力）
         try:
             conn = nw.get_conn("1#发电锅炉_转炉煤气入口")
             data = conn_data.get("1#发电锅炉_转炉煤气入口", {})
             fluid_comp = {'N2': 0.3389, 'CO': 0.4223, 'CO2': 0.2381, 'H2': 0.0007}
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
+            conn.set_attr(m=data.get('m'), T=data.get('T'), fluid=fluid_comp)
         except KeyError:
             pass
-        
-        # 焦炉煤气：固定流量、压力、温度
+
+        # 焦炉煤气：固定流量、温度、流体组分（不设置压力）
         try:
             conn = nw.get_conn("1#发电锅炉_焦炉煤气入口")
             data = conn_data.get("1#发电锅炉_焦炉煤气入口", {})
             fluid_comp = {'N2': 0.2018, 'CO': 0.2305, 'CO2': 0.0996, 'H2': 0.1311, 'CH4': 0.337}
-            conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid=fluid_comp)
+            conn.set_attr(m=data.get('m'), T=data.get('T'), fluid=fluid_comp)
         except KeyError:
             pass
-        
-        # 泵入口（凝结水）：固定压力和温度
+
+        # 泵入口（凝结水）：固定压力和质量分数x，指定流体（水/蒸汽循环的唯一流体设置点）
         try:
             conn = nw.get_conn("1#发电锅炉_水泵入口")
             data = conn_data.get("1#发电锅炉_水泵入口", {})
-            conn.set_attr(p=data['p'], T=data['T'], fluid={'water': 1})
+            # 使用质量分数x代替温度来确定状态（避免饱和点附近的数值问题）
+            conn.set_attr(p=data.get('p'), x=data.get('x'), fluid={'water': 1})
         except KeyError:
             pass
-        
+
         # 汽包饱和蒸汽：固定干度
         try:
             conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
             conn.set_attr(x=1.0)
         except KeyError:
             pass
-        
-        # 高压缸排汽抽汽：固定流量（从CSV看是20 t/h）
+
+        # 高压缸排汽抽汽：固定流量（静态数据给出为20 t/h）
         try:
             conn = nw.get_conn("抽凝式汽轮机1_高压缸排汽抽汽")
             data = conn_data.get("抽凝式汽轮机1_高压缸排汽抽汽", {})
-            if pd.notna(data['m']) and data['m'] > 0:
+            if data.get('m') is not None and data['m'] > 0:
                 conn.set_attr(m=data['m'])
         except KeyError:
             pass
-        
-        # 所有低压缸抽汽出口设置为0流量（从CSV看这些都是0）
+
+        # 所有低压缸抽汽出口设置为0流量（静态数据中均为0）
         for i in range(1, 7):
             try:
                 label = f"抽凝式汽轮机1_再热蒸汽{i}段抽汽出口"
@@ -530,24 +481,22 @@ class CompleteBoilerTurbineModel:
                 conn.set_attr(m=0.0)
             except KeyError:
                 pass
-        
+
         # 高压缸一段抽汽出口设置为0
         try:
             conn = nw.get_conn("抽凝式汽轮机1_高压蒸汽高压缸一段抽汽出口")
             conn.set_attr(m=0.0)
         except KeyError:
             pass
-        
+
         print("   ✓ 边界条件设置完成（使用初始值策略避免过度约束）")
 
     def solve(
         self,
         *,
-        use_reference_init: bool = False,
-        allow_fallback: bool = True,
         max_iter: int | None = 200,
     ) -> bool:
-        """求解网络（默认使用CSV初始值而非导出的状态文件）"""
+        """求解网络（使用静态数据初始值）"""
         if self.nw is None:
             self.build_network()
         assert self.nw is not None
@@ -556,31 +505,16 @@ class CompleteBoilerTurbineModel:
             self.nw.set_attr(max_iter=max_iter)
 
         print("\n开始求解...")
-        print("警告: 由于模型复杂性，求解可能需要较长时间...")
+        print("提示: 使用静态数据初始值进行求解...")
 
-        solver_desc = "默认初始值"
+        solver_desc = "静态数据初始值"
         try:
-            if use_reference_init:
-                solver_desc = "参考初始化路径"
-                self.nw.solve(mode="design", init_path=str(self.reference_path))
-            else:
-                self.nw.solve(mode="design")
+            self.nw.solve(mode="design")
         except Exception as exc:
             print(f"✗ 求解失败（{solver_desc}）: {exc}")
-            if not use_reference_init and allow_fallback:
-                print("→ 尝试使用参考初始化路径重新求解 ...")
-                try:
-                    solver_desc = "参考初始化路径（回退）"
-                    self.nw.solve(mode="design", init_path=str(self.reference_path))
-                except Exception as fallback_exc:
-                    print(f"✗ 使用参考路径依然失败: {fallback_exc}")
-                    import traceback
-                    traceback.print_exc()
-                    return False
-            else:
-                import traceback
-                traceback.print_exc()
-                return False
+            import traceback
+            traceback.print_exc()
+            return False
 
         if not self.nw.converged:
             print("✗ 未收敛")
