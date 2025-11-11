@@ -166,8 +166,8 @@ def test_stage2_convergence():
 
 | 标准 | 状态 | 实现方式 |
 |------|------|----------|
-| 求解验证产生收敛结果 | ✅ | `Stage2ModelValidator.verify_model_convergence()` |
-| 无需导出求解状态即可求解 | ✅ | `solve(use_reference_init=False)` |
+| 求解验证产生收敛结果 | ⚠️ | `Stage2ModelValidator.verify_model_convergence()`（需调试） |
+| 无需导出求解状态即可求解 | ⚠️ | `solve()`（基于静态数据，需调试） |
 | 对比逻辑读取参考 CSV | ✅ | `load_reference_data()`, `compare_with_reference()` |
 | 计算差异（连接、KPI） | ✅ | `_compare_connections()`, `_compare_components()` |
 | 结构化报告（JSON + Markdown） | ✅ | `generate_json_report()`, `generate_markdown_report()` |
@@ -177,6 +177,8 @@ def test_stage2_convergence():
 | 捕获收敛指标 | ✅ | `_collect_convergence_metrics()` |
 | 可选 CLI 命令 | ✅ | `run_stage2_validation.sh` |
 | 可选 pytest 集成 | ✅ | 文档中提供示例 |
+| 独立对比脚本 | ✅ | `compare_stage2_results.py` |
+| 中文文档与报告 | ✅ | `docs/stage2详细模型验证报告.md` |
 
 ## 技术细节
 
@@ -212,16 +214,14 @@ conn.set_attr(m=data['m'], p=data['p'], T=data['T'], fluid={'N2': 0.76, 'O2': 0.
 def solve(
     self,
     *,
-    use_reference_init: bool = False,
-    allow_fallback: bool = True,
     max_iter: int | None = 200,
 ) -> bool:
-    """使用可配置策略求解并收集指标"""
+    """使用静态数据初始值求解并收集指标"""
     # ... 实现 ...
     self.convergence_info = {
         "converged": self.nw.converged,
         "iterations": self.nw.iter,
-        "solver_strategy": solver_desc,
+        "solver_strategy": "静态数据初始值",
     }
     return self.nw.converged
 ```

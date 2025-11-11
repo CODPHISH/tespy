@@ -109,10 +109,10 @@ class Stage2ModelValidator:
             
             # 求解
             print("\n[2/3] 求解网络...")
-            success = self.model.solve(use_reference_init=False, allow_fallback=False)
+            success = self.model.solve()
             
             if not success:
-                print("✗ 模型在不使用导出求解状态的情况下未能收敛")
+                print("✗ 模型未能收敛")
                 return False
             
             print("✓ 模型收敛成功")
