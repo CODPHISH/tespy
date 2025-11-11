@@ -529,35 +529,26 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 增加温度约束以满足参数需求  
-        # 汽包给水入口温度
+        # 添加4个温度约束满足参数需求
+        # 1. 水侧上省入口（给水温度）
         try:
-            conn = nw.get_conn("1#发电锅炉_汽包给水入口")
-            data = conn_data.get("1#发电锅炉_汽包给水入口", {})
+            conn = nw.get_conn("1#发电锅炉_水侧上省入口")
+            data = conn_data.get("1#发电锅炉_水侧上省入口", {})
             if data.get('T') is not None:
                 conn.set_attr(T=data['T'])
         except KeyError:
             pass
 
-        # 水泵出口温度（不设置下省入口温度，因为两者通过节流阀线性依赖）
+        # 2. 蒸汽低过出口
         try:
-            conn = nw.get_conn("1#发电锅炉_水泵出口")
-            data = conn_data.get("1#发电锅炉_水泵出口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
-        except KeyError:
-            pass
-        
-        # 蒸汽屏过出口温度
-        try:
-            conn = nw.get_conn("1#发电锅炉_蒸汽屏过出口")
-            data = conn_data.get("1#发电锅炉_蒸汽屏过出口", {})
+            conn = nw.get_conn("1#发电锅炉_蒸汽低过出口")
+            data = conn_data.get("1#发电锅炉_蒸汽低过出口", {})
             if data.get('T') is not None:
                 conn.set_attr(T=data['T'])
         except KeyError:
             pass
 
-        # 蒸汽三过出口温度
+        # 3. 蒸汽三过出口
         try:
             conn = nw.get_conn("1#发电锅炉_蒸汽三过出口")
             data = conn_data.get("1#发电锅炉_蒸汽三过出口", {})
@@ -566,12 +557,21 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        print("   ✓ 边界条件设置完成（入口+温度+压力锚点）")
+        # 4. 再热蒸汽低再出口
+        try:
+            conn = nw.get_conn("1#发电锅炉_再热蒸汽低再出口")
+            data = conn_data.get("1#发电锅炉_再热蒸汽低再出口", {})
+            if data.get('T') is not None:
+                conn.set_attr(T=data['T'])
+        except KeyError:
+            pass
+
+        print("   ✓ 边界条件设置完成（入口+关键温度锚点+压力锚点）")
 
     def solve(
         self,
         *,
-        max_iter: int | None = 200,
+        max_iter: int | None = 500,
     ) -> bool:
         """求解网络（使用静态数据初始值）"""
         if self.nw is None:
@@ -583,9 +583,11 @@ class CompleteBoilerTurbineModel:
 
         print("\n开始求解...")
         print("提示: 使用静态数据初始值进行求解...")
+        print("提示: 增加迭代次数到500...")
 
         solver_desc = "静态数据初始值"
         try:
+            # 直接求解，不使用init_path（静态数据已经提供了初始值）
             self.nw.solve(mode="design")
         except Exception as exc:
             print(f"✗ 求解失败（{solver_desc}）: {exc}")
