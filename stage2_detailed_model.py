@@ -318,18 +318,23 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        # 换热器参数 - 仅设置kA与气侧压降pr1
+        # 换热器参数 - 设置kA和pr1，并对关键换热器设置pr2
+        # 策略：只为不在主循环中的换热器（再热器）设置pr2，避免主循环过度约束
         if 'HeatExchanger' in self.component_data:
             for name, params in self.component_data['HeatExchanger'].items():
                 try:
                     comp = nw.get_comp(name)
                     kA = params.get('kA')
                     pr1 = params.get('pr1')
+                    pr2 = params.get('pr2')
                     if kA is not None:
                         comp.set_attr(kA=kA)
                     if pr1 is not None:
                         comp.set_attr(pr1=pr1)
-                    # 不设置pr2，避免在水/蒸汽侧的循环压降重复约束
+                    # 只为再热器设置pr2，确保再热压力链传递
+                    # 再热器是从高压缸排汽到低压缸入口的支路，不在主循环中
+                    if pr2 is not None and "再热" in name:
+                        comp.set_attr(pr2=pr2)
                 except KeyError:
                     pass
         
@@ -415,11 +420,11 @@ class CompleteBoilerTurbineModel:
 
         # === 仅设置关键固定边界条件 ===
 
-        # 主蒸汽：固定流量、温度和压力
+        # 主蒸汽：固定流量和温度（不固定压力，避免与排气压力形成循环约束）
         try:
             conn = nw.get_conn("1#发电锅炉_主蒸汽")
             data = conn_data.get("1#发电锅炉_主蒸汽", {})
-            conn.set_attr(m=data.get('m'), T=data.get('T'), p=data.get('p'))
+            conn.set_attr(m=data.get('m'), T=data.get('T'))
         except KeyError:
             pass
 
@@ -518,18 +523,17 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 仅固定一个压力锚点（凝汽器背压）
-        # 由于设置了所有组件的pr，整个循环压力链已被确定
-        # 只需要一个锚点即可确定所有压力
+        # 固定一个压力锚点（泵出口压力）以确定整个循环的压力水平
+        # 选择泵出口而不是排气出口，因为泵有pr设置，可以反推泵入口压力
         try:
-            conn = nw.get_conn("抽凝式汽轮机1_中压缸排气出口")
-            data = conn_data.get("抽凝式汽轮机1_中压缸排气出口", {})
+            conn = nw.get_conn("1#发电锅炉_水泵出口")
+            data = conn_data.get("1#发电锅炉_水泵出口", {})
             if data.get('p') is not None:
                 conn.set_attr(p=data['p'])
         except KeyError:
             pass
 
-        # 添加4个温度约束满足参数需求
+        # 添加3个温度约束满足参数需求（比76个少1个）
         # 1. 水侧上省入口（给水温度）
         try:
             conn = nw.get_conn("1#发电锅炉_水侧上省入口")
@@ -557,14 +561,7 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 4. 再热蒸汽低再出口
-        try:
-            conn = nw.get_conn("1#发电锅炉_再热蒸汽低再出口")
-            data = conn_data.get("1#发电锅炉_再热蒸汽低再出口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
-        except KeyError:
-            pass
+        # 不设置再热蒸汽低再出口温度，让系统自由计算
 
         print("   ✓ 边界条件设置完成（入口+关键温度锚点+压力锚点）")
 
