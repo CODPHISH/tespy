@@ -318,8 +318,8 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        # 换热器参数 - 设置kA和pr1，并对关键换热器设置pr2
-        # 策略：只为不在主循环中的换热器（再热器）设置pr2，避免主循环过度约束
+        # 换热器参数 - 设置kA和pr1，以及pr2
+        # 策略：为所有换热器设置pr2，确保水/蒸汽侧压力链传递
         if 'HeatExchanger' in self.component_data:
             for name, params in self.component_data['HeatExchanger'].items():
                 try:
@@ -331,24 +331,20 @@ class CompleteBoilerTurbineModel:
                         comp.set_attr(kA=kA)
                     if pr1 is not None:
                         comp.set_attr(pr1=pr1)
-                    # 只为再热器设置pr2，确保再热压力链传递
-                    # 再热器是从高压缸排汽到低压缸入口的支路，不在主循环中
-                    if pr2 is not None and "再热" in name:
+                    # 仅为下级省煤器与低温再热器设置pr2，其他保持自由以避免循环
+                    if pr2 is not None and name in {"1#发电锅炉_下级省煤器", "1#发电锅炉_低温再热器"}:
                         comp.set_attr(pr2=pr2)
                 except KeyError:
                     pass
         
-        # 泵参数
+        # 泵参数 - 只设置效率，不设置pr以避免循环约束
         if 'Pump' in self.component_data:
             for name, params in self.component_data['Pump'].items():
                 try:
                     comp = nw.get_comp(name)
                     eta_s = params.get('eta_s')
-                    pr = params.get('pr')
                     if eta_s is not None:
                         comp.set_attr(eta_s=eta_s)
-                    if pr is not None:
-                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
         
@@ -420,7 +416,7 @@ class CompleteBoilerTurbineModel:
 
         # === 仅设置关键固定边界条件 ===
 
-        # 主蒸汽：固定流量和温度（不固定压力，避免与排气压力形成循环约束）
+        # 主蒸汽：固定质量流量与温度（压力由系统平衡计算）
         try:
             conn = nw.get_conn("1#发电锅炉_主蒸汽")
             data = conn_data.get("1#发电锅炉_主蒸汽", {})
@@ -464,21 +460,16 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 泵入口（凝结水）：固定质量分数与流体，不固定压力
-        # 泵入口压力通过CycleCloser与排气出口压力形成线性依赖，不能同时固定
+        # 烟气出口：保持静态初值，不额外固定压力
+
+        # 泵入口（凝结水）：固定流体组成，不固定压力和干度
         try:
             conn = nw.get_conn("1#发电锅炉_水泵入口")
-            data = conn_data.get("1#发电锅炉_水泵入口", {})
-            conn.set_attr(x=data.get('x'), fluid={'water': 1})
+            conn.set_attr(fluid={'water': 1})
         except KeyError:
             pass
 
-        # 汽包饱和蒸汽：固定干度
-        try:
-            conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
-            conn.set_attr(x=1.0)
-        except KeyError:
-            pass
+        # 汽包饱和蒸汽：仅保持连接（干度由汽包热平衡自行确定）
 
         # 高压缸排汽抽汽：固定流量（静态数据给出为20 t/h）
         try:
@@ -505,7 +496,7 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 再热蒸汽出口：固定温度（设计点）
+        # 再热蒸汽出口：固定设计温度
         try:
             conn = nw.get_conn("1#发电锅炉_再热蒸汽高再出口")
             data = conn_data.get("1#发电锅炉_再热蒸汽高再出口", {})
@@ -514,27 +505,7 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 汽包下降管：固定流量（循环倍率）
-        try:
-            conn = nw.get_conn("1#发电锅炉_下降管入口")
-            data = conn_data.get("1#发电锅炉_下降管入口", {})
-            if data.get('m') is not None:
-                conn.set_attr(m=data['m'])
-        except KeyError:
-            pass
-
-        # 固定一个压力锚点（泵出口压力）以确定整个循环的压力水平
-        # 选择泵出口而不是排气出口，因为泵有pr设置，可以反推泵入口压力
-        try:
-            conn = nw.get_conn("1#发电锅炉_水泵出口")
-            data = conn_data.get("1#发电锅炉_水泵出口", {})
-            if data.get('p') is not None:
-                conn.set_attr(p=data['p'])
-        except KeyError:
-            pass
-
-        # 添加3个温度约束满足参数需求（比76个少1个）
-        # 1. 水侧上省入口（给水温度）
+        # 添加关键温度锚点
         try:
             conn = nw.get_conn("1#发电锅炉_水侧上省入口")
             data = conn_data.get("1#发电锅炉_水侧上省入口", {})
@@ -543,7 +514,6 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 2. 蒸汽低过出口
         try:
             conn = nw.get_conn("1#发电锅炉_蒸汽低过出口")
             data = conn_data.get("1#发电锅炉_蒸汽低过出口", {})
@@ -552,7 +522,6 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 3. 蒸汽三过出口
         try:
             conn = nw.get_conn("1#发电锅炉_蒸汽三过出口")
             data = conn_data.get("1#发电锅炉_蒸汽三过出口", {})
@@ -561,9 +530,48 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 不设置再热蒸汽低再出口温度，让系统自由计算
+        try:
+            conn = nw.get_conn("1#发电锅炉_再热蒸汽低再出口")
+            data = conn_data.get("1#发电锅炉_再热蒸汽低再出口", {})
+            if data.get('T') is not None:
+                conn.set_attr(T=data['T'])
+        except KeyError:
+            pass
+        # 汽包饱和蒸汽：固定干度（压力由水循环平衡确定）
+        try:
+            conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
+            conn.set_attr(x=1.0)
+        except KeyError:
+            pass
 
-        print("   ✓ 边界条件设置完成（入口+关键温度锚点+压力锚点）")
+        # 汽包下降管：固定流量（汽水循环倍率）
+        try:
+            conn = nw.get_conn("1#发电锅炉_下降管入口")
+            data = conn_data.get("1#发电锅炉_下降管入口", {})
+            if data.get('m') is not None:
+                conn.set_attr(m=data['m'])
+        except KeyError:
+            pass
+
+        # 泵出口：固定压力（提供主循环高压锚点）
+        try:
+            conn = nw.get_conn("1#发电锅炉_水泵出口")
+            data = conn_data.get("1#发电锅炉_水泵出口", {})
+            if data.get('p') is not None:
+                conn.set_attr(p=data['p'])
+        except KeyError:
+            pass
+
+        # 固定冷端压力锚点（凝汽器出口压力）
+        try:
+            conn = nw.get_conn("抽凝式汽轮机1_中压缸排气出口")
+            data = conn_data.get("抽凝式汽轮机1_中压缸排气出口", {})
+            if data.get('p') is not None:
+                conn.set_attr(p=data['p'])
+        except KeyError:
+            pass
+
+        print("   ✓ 边界条件设置完成（入口+关键设计点+压力锚点）")
 
     def solve(
         self,
