@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./venv/Scripts/python.exe advanced_blast_furnace_gas_network.py)",
+      "Bash(./venv/Scripts/python.exe:*)"
+    ],
+    "deny": []
+  }
+}
