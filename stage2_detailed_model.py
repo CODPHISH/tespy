@@ -296,13 +296,13 @@ class CompleteBoilerTurbineModel:
     def _set_component_parameters(self, nw: Network) -> None:
         """设置组件参数（从静态数据读取）
 
-        策略：保留关键压降参数但避免重复约束
+        策略：
         - 汽轮机：设置效率和压力比（保持设计膨胀比）
-        - 换热器：设置传热系数kA，并仅设置气侧压降（pr1），不设置水侧pr2
+        - 换热器：设置传热系数kA，并设置气侧压降（pr1）和水侧压降（pr2）
+          注意：排除蒸发器（自然循环回路的一部分），避免循环过度约束
         - 泵：设置效率和压力比
-        - 阀门、管道：设置压力比（保持原设计压降）
+        - 阀门、管道：设置压力比
         - 燃烧室：设置空气系数与效率
-        通过避免在水/蒸汽侧重复设置压降并减少绝对压力约束，降低循环依赖风险。
         """
         # 汽轮机参数
         if 'Turbine' in self.component_data:
@@ -318,8 +318,8 @@ class CompleteBoilerTurbineModel:
                 except KeyError:
                     pass
         
-        # 换热器参数 - 设置kA和pr1，以及pr2
-        # 策略：为所有换热器设置pr2，确保水/蒸汽侧压力链传递
+        # 换热器参数
+        # 策略：为绝大多数换热器设置pr2，确保水/蒸汽侧压力链完整
         if 'HeatExchanger' in self.component_data:
             for name, params in self.component_data['HeatExchanger'].items():
                 try:
@@ -327,12 +327,15 @@ class CompleteBoilerTurbineModel:
                     kA = params.get('kA')
                     pr1 = params.get('pr1')
                     pr2 = params.get('pr2')
-                    if kA is not None:
-                        comp.set_attr(kA=kA)
+                    # kA注释掉，改用温度约束
+                    # if kA is not None:
+                    #     comp.set_attr(kA=kA)
                     if pr1 is not None:
                         comp.set_attr(pr1=pr1)
-                    # 仅为下级省煤器与低温再热器设置pr2，其他保持自由以避免循环
-                    if pr2 is not None and name in {"1#发电锅炉_下级省煤器", "1#发电锅炉_低温再热器"}:
+                    
+                    # 关键修改：为除了蒸发器以外的所有换热器设置pr2
+                    # 蒸发器在汽包回路中，由回路压力平衡决定，通常不设置固定压降（或设为1但不在此处强行约束）
+                    if pr2 is not None and name != "1#发电锅炉_蒸发器上升管":
                         comp.set_attr(pr2=pr2)
                 except KeyError:
                     pass
@@ -355,7 +358,9 @@ class CompleteBoilerTurbineModel:
                     comp = nw.get_comp(name)
                     pr = params.get('pr')
                     if pr is not None:
-                        comp.set_attr(pr=pr)
+                        # 关键修改：跳过进水阀的压降固定，增加一个自由度以解决压力闭环的过约束问题
+                        if name != "1#发电锅炉_进水阀":
+                            comp.set_attr(pr=pr)
                 except KeyError:
                     pass
 
@@ -377,10 +382,13 @@ class CompleteBoilerTurbineModel:
                     comp = nw.get_comp(name)
                     lamb = params.get('lamb')
                     eta = params.get('eta')
+                    pr = params.get('pr')
                     if lamb is not None:
                         comp.set_attr(lamb=lamb)
                     if eta is not None:
                         comp.set_attr(eta=eta)
+                    if pr is not None:
+                        comp.set_attr(pr=pr)
                 except KeyError:
                     pass
 
@@ -403,24 +411,39 @@ class CompleteBoilerTurbineModel:
                 if conn is None:
                     continue
                 # 只设置初始值，不固定
-                if data['m'] is not None and data['m'] > 1e-6:  # 避免0流量
+                if data.get('m') is not None and data['m'] > 1e-6:  # 避免0流量
                     conn.set_attr(m0=data['m'])
-                if data['p'] is not None and data['p'] > 0:
-                    conn.set_attr(p0=data['p'])
-                if data['T'] is not None:
+                if data.get('p') is not None and data['p'] > 0:
+                    if data.get('x') is not None:
+                        # Offset p0 to avoid exact saturation match in presolve
+                        conn.set_attr(p0=data['p'] + 10000)
+                    else:
+                        conn.set_attr(p0=data['p'])
+                
+                # 如果有干度x，优先使用h0，避免在饱和区设置p0+T0导致CoolProp报错
+                if data.get('x') is not None:
+                    # Skip T0/x0
+                    pass
+                elif data.get('T') is not None:
                     conn.set_attr(T0=data['T'])
-                if data['h'] is not None:
-                    conn.set_attr(h0=data['h'])
+                
+                if data.get('h') is not None:
+                    if data.get('x') is not None:
+                        # Significant offset to h0 to push it out of saturation for initialization
+                        conn.set_attr(h0=data['h'] + 50000)
+                    else:
+                        conn.set_attr(h0=data['h'])
             except KeyError:
                 pass
 
         # === 仅设置关键固定边界条件 ===
 
-        # 主蒸汽：固定质量流量与温度（压力由系统平衡计算）
+        # 主蒸汽：固定质量流量与温度，并固定压力作为系统压力锚点
         try:
             conn = nw.get_conn("1#发电锅炉_主蒸汽")
             data = conn_data.get("1#发电锅炉_主蒸汽", {})
-            conn.set_attr(m=data.get('m'), T=data.get('T'))
+            # 关键修改：在此处固定压力，避开汽包饱和区初始化的数值问题
+            conn.set_attr(m=data.get('m'), T=data.get('T'), p=data.get('p'))
         except KeyError:
             pass
 
@@ -432,13 +455,13 @@ class CompleteBoilerTurbineModel:
         except KeyError:
             pass
 
-        # 高炉煤气入口：固定流量、压力、温度、流体组分
+        # 高炉煤气入口：固定流量、温度、流体组分（解除压力固定，由燃烧室压力平衡决定）
         try:
             conn = nw.get_conn("boiler1_高炉煤气入口")
             data = conn_data.get("boiler1_高炉煤气入口", {})
             fluid_comp = {'N2': 0.4609, 'CO': 0.2078, 'CO2': 0.3293, 'H2': 0.002}
-            # 只在一个燃气入口设置压力，其他的仅设置流量和温度
-            conn.set_attr(m=data.get('m'), p=data.get('p'), T=data.get('T'), fluid=fluid_comp)
+            # 关键修改：移除 p=...，只固定 m, T
+            conn.set_attr(m=data.get('m'), T=data.get('T'), fluid=fluid_comp)
         except KeyError:
             pass
 
@@ -462,7 +485,7 @@ class CompleteBoilerTurbineModel:
 
         # 烟气出口：保持静态初值，不额外固定压力
 
-        # 泵入口（凝结水）：固定流体组成，不固定压力和干度
+        # 泵入口（凝结水）：固定流体组成，避免在此处固定压力（让泵压比自由调整）
         try:
             conn = nw.get_conn("1#发电锅炉_水泵入口")
             conn.set_attr(fluid={'water': 1})
@@ -470,6 +493,14 @@ class CompleteBoilerTurbineModel:
             pass
 
         # 汽包饱和蒸汽：仅保持连接（干度由汽包热平衡自行确定）
+        # 压力由主蒸汽压力逆推确定
+        try:
+            conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
+            data = conn_data.get("1#发电锅炉_汽包饱和蒸汽出口", {})
+            # if data.get('p') is not None:
+            #     conn.set_attr(p=data.get('p'))
+        except KeyError:
+            pass
 
         # 高压缸排汽抽汽：固定流量（静态数据给出为20 t/h）
         try:
@@ -500,82 +531,44 @@ class CompleteBoilerTurbineModel:
         try:
             conn = nw.get_conn("1#发电锅炉_再热蒸汽高再出口")
             data = conn_data.get("1#发电锅炉_再热蒸汽高再出口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
+            conn.set_attr(T=data.get('T'))
         except KeyError:
             pass
-
-        # 添加关键温度锚点
-        try:
-            conn = nw.get_conn("1#发电锅炉_水侧上省入口")
-            data = conn_data.get("1#发电锅炉_水侧上省入口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
-        except KeyError:
-            pass
-
-        try:
-            conn = nw.get_conn("1#发电锅炉_蒸汽低过出口")
-            data = conn_data.get("1#发电锅炉_蒸汽低过出口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
-        except KeyError:
-            pass
-
-        try:
-            conn = nw.get_conn("1#发电锅炉_蒸汽三过出口")
-            data = conn_data.get("1#发电锅炉_蒸汽三过出口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
-        except KeyError:
-            pass
-
-        try:
-            conn = nw.get_conn("1#发电锅炉_再热蒸汽低再出口")
-            data = conn_data.get("1#发电锅炉_再热蒸汽低再出口", {})
-            if data.get('T') is not None:
-                conn.set_attr(T=data['T'])
-        except KeyError:
-            pass
-        # 汽包饱和蒸汽：固定干度（压力由水循环平衡确定）
-        try:
-            conn = nw.get_conn("1#发电锅炉_汽包饱和蒸汽出口")
-            conn.set_attr(x=1.0)
-        except KeyError:
-            pass
-
-        # 汽包下降管：固定流量（汽水循环倍率）
-        try:
-            conn = nw.get_conn("1#发电锅炉_下降管入口")
-            data = conn_data.get("1#发电锅炉_下降管入口", {})
-            if data.get('m') is not None:
-                conn.set_attr(m=data['m'])
-        except KeyError:
-            pass
-
-        # 泵出口：固定压力（提供主循环高压锚点）
-        try:
-            conn = nw.get_conn("1#发电锅炉_水泵出口")
-            data = conn_data.get("1#发电锅炉_水泵出口", {})
-            if data.get('p') is not None:
-                conn.set_attr(p=data['p'])
-        except KeyError:
-            pass
-
-        # 固定冷端压力锚点（凝汽器出口压力）
-        try:
-            conn = nw.get_conn("抽凝式汽轮机1_中压缸排气出口")
-            data = conn_data.get("抽凝式汽轮机1_中压缸排气出口", {})
-            if data.get('p') is not None:
-                conn.set_attr(p=data['p'])
-        except KeyError:
-            pass
+            
+        # 增加关键中间点温度固定，以补充缺失的kA约束
+        # 遍历所有换热器，固定其Side 2出口温度
+        
+        # Manually list ALL HX outlets
+        hx_outlets = [
+            # Water/Steam
+            "1#发电锅炉_水侧上省入口", # Lower Eco Out
+            "1#发电锅炉_汽包给水入口", # Upper Eco Out
+            "1#发电锅炉_上升管出口",   # Evap Out
+            "1#发电锅炉_蒸汽低过出口", # Low SH Out
+            "1#发电锅炉_蒸汽屏过出口", # Screen SH Out
+            "1#发电锅炉_蒸汽三过出口", # Tertiary SH Out
+            "1#发电锅炉_主蒸汽",       # Final SH Out
+            "1#发电锅炉_再热蒸汽低再出口", # Low RH Out
+            "1#发电锅炉_再热蒸汽高再出口", # Final RH Out
+            # Air/Fuel
+            "1#发电锅炉_空气锅炉入口", # Air Preheat Out
+            "1#发电锅炉_高转煤气预热后", # Fuel Preheat Out
+        ]
+        
+        for label in hx_outlets:
+            try:
+                conn = nw.get_conn(label)
+                data = conn_data.get(label, {})
+                if data.get('T') is not None:
+                    # print(f"DEBUG: Setting T for {label} = {data.get('T')}")
+                    conn.set_attr(T=data.get('T'))
+            except KeyError:
+                pass
 
         print("   ✓ 边界条件设置完成（入口+关键设计点+压力锚点）")
 
     def solve(
         self,
-        *,
         max_iter: int | None = 500,
     ) -> bool:
         """求解网络（使用静态数据初始值）"""
@@ -586,7 +579,7 @@ class CompleteBoilerTurbineModel:
         if max_iter is not None:
             self.nw.set_attr(max_iter=max_iter)
 
-        print("\n开始求解...")
+        print("\\n开始求解...")
         print("提示: 使用静态数据初始值进行求解...")
         print("提示: 增加迭代次数到500...")
 
@@ -617,7 +610,7 @@ class CompleteBoilerTurbineModel:
             except Exception:
                 pass
 
-        print("✓ 求解成功\n")
+        print("✓ 求解成功\\n")
         return True
 
     def analyze(self) -> dict:
@@ -638,9 +631,8 @@ class CompleteBoilerTurbineModel:
             "抽凝式汽轮机1_低压缸五段", "抽凝式汽轮机1_低压缸六段",
             "抽凝式汽轮机1_低压缸七段"
         ]
-
         P_turb_total = 0.0
-        print("\n【汽轮机功率分布】")
+        print("\\n【汽轮机功率分布】")
         for name in turb_names:
             turb = self.nw.get_comp(name)
             P = abs(turb.P.val) / 1e6  # W -> MW
@@ -652,10 +644,9 @@ class CompleteBoilerTurbineModel:
         P_pump = abs(pump.P.val) / 1e6
         P_net = P_turb_total - P_pump
 
-        print(f"\n  汽轮机总功:  {P_turb_total:10.3f} MW")
+        print(f"\\n  汽轮机总功:  {P_turb_total:10.3f} MW")
         print(f"  泵功:        {P_pump:10.3f} MW")
         print(f"  净功率:      {P_net:10.3f} MW ⭐")
-
         print("=" * 80)
 
         self.results = {
@@ -663,25 +654,26 @@ class CompleteBoilerTurbineModel:
             "P_turbine_total_MW": P_turb_total,
             "P_pump_MW": P_pump,
         }
-
         return self.results
 
     def export(self, path: Path = Path("stage2_complete_results.json")) -> None:
         """导出结果"""
         if not self.results:
             return
+        
         with path.open("w", encoding="utf-8") as f:
             json.dump(self.results, f, indent=2, ensure_ascii=False)
-        print(f"\n✓ 结果已保存到：{path}\n")
+        
+        print(f"\\n✓ 结果已保存到：{path}\\n")
 
 
 def main() -> None:
     """主程序"""
     logging.getLogger("tespy").setLevel(logging.WARNING)
-
+    
     model = CompleteBoilerTurbineModel()
     model.build_network()
-
+    
     if model.solve():
         model.analyze()
         model.export()
